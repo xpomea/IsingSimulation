@@ -5,7 +5,9 @@ use std::time::Instant;
 mod dynamics;
 mod ising_model;
 use dynamics::{Dynamics, MetropolisDynamics};
-use ising_model::{InitialCondition, IsingModel, BoundaryCondition};
+use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
+
+use crate::dynamics::CreutzKawasakiDynamics;
 
 struct IsingApp {
     model: IsingModel,
@@ -25,9 +27,10 @@ struct IsingApp {
 
 impl Default for IsingApp {
     fn default() -> Self {
+        let l = 100;
         return Self {
-            model: IsingModel::new(100, InitialCondition::Random, BoundaryCondition::Periodic),
-            dynamics: Dynamics::Metropolis(MetropolisDynamics::new(2.269)),
+            model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
+            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.999, 8)),
             steps_per_frame: 10,
             is_running: false,
             texture: None,
@@ -62,16 +65,16 @@ impl eframe::App for IsingApp {
             let window = 300;
             let mut sum_mag = 0.0;
             let mut sum_mag_squared = 0.0;
-            
+
             let start_idx = self.history_mag.len().saturating_sub(window);
             for i in start_idx..self.history_mag.len() {
                 sum_mag += self.history_mag[i][1];
                 sum_mag_squared += self.history_mag[i][1].powf(2.0);
             }
-            
+
             let window_len = (self.history_mag.len() - start_idx).max(1) as f64;
             let n = self.model.l * self.model.l;
-            
+
             let beta = match &self.dynamics {
                 Dynamics::Metropolis(d) => d.beta,
                 _ => 1.0,
@@ -117,8 +120,14 @@ impl eframe::App for IsingApp {
                     {
                         metro.set_temperature(temp);
                     }
-                },
-                _ => {}
+                }
+                Dynamics::CreutzKawasaki(creutz) => {
+                    let sum_h: i32 = creutz.demons_h.iter().sum();
+                    let sum_v: i32 = creutz.demons_v.iter().sum();
+                    let total_demons = creutz.demons_h.len() + creutz.demons_v.len();
+                    let avg_demon_energy = (sum_h + sum_v) as f64 / total_demons as f64;
+                    ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
+                }
             }
 
             ui.separator();
@@ -167,45 +176,73 @@ impl eframe::App for IsingApp {
             ));
         });
 
-        egui::SidePanel::right("plots_panel")
-            .min_width(300.0)
-            .default_width(400.0)
+        // egui::SidePanel::right("plots_panel")
+        //     .min_width(300.0)
+        //     .default_width(400.0)
+        //     .show(ctx, |ui| {
+        //         ui.heading("Charts");
+
+        //         ui.label("Magnetism:");
+        //         let line_mag = Line::new(PlotPoints::new(self.history_mag.clone()))
+        //             .color(egui::Color32::from_rgb(200, 50, 50));
+
+        //         Plot::new("mag_plot")
+        //             .view_aspect(2.0) // Соотношение сторон
+        //             .include_y(-1.1)
+        //             .include_y(1.1)
+        //             .show(ui, |plot_ui| plot_ui.line(line_mag));
+
+        //         ui.add_space(20.0);
+
+        //         ui.label("Energy:");
+        //         let line_energy = Line::new(PlotPoints::new(self.history_energy.clone()))
+        //             .color(egui::Color32::from_rgb(50, 50, 200));
+
+        //         Plot::new("energy_plot")
+        //             .view_aspect(2.0)
+        //             .include_y(-2.1)
+        //             .include_y(0.1)
+        //             .show(ui, |plot_ui| plot_ui.line(line_energy));
+
+        //         ui.add_space(20.0);
+
+        //         ui.label("Susceptibility:");
+        //         let line_susceptibility =
+        //             Line::new(PlotPoints::new(self.history_susceptibility.clone()))
+        //                 .color(egui::Color32::from_rgb(50, 200, 50));
+
+        //         Plot::new("susceptibility_plot")
+        //             .view_aspect(2.0)
+        //             .include_y(-0.1)
+        //             .show(ui, |plot_ui| plot_ui.line(line_susceptibility));
+        //     });
+
+        egui::TopBottomPanel::bottom("bottom_plot")
+            .resizable(true)
+            .min_height(150.0)
             .show(ctx, |ui| {
-                ui.heading("Charts");
+                ui.heading("Vertical Magnetization Profile");
 
-                ui.label("Magnetism:");
-                let line_mag = Line::new(PlotPoints::new(self.history_mag.clone()))
-                    .color(egui::Color32::from_rgb(200, 50, 50));
+                let mut col_mag = vec![0.0; self.model.l];
+                for x in 0..self.model.l {
+                    let mut sum = 0;
+                    for y in 0..self.model.l {
+                        sum += self.model.lattice[y * self.model.l + x];
+                    }
+                    col_mag[x] = sum as f64 / self.model.l as f64;
+                }
+                let points: Vec<[f64; 2]> = col_mag
+                    .into_iter()
+                    .enumerate()
+                    .map(|(x, m)| [x as f64, m])
+                    .collect();
+                let line = Line::new(PlotPoints::new(points))
+                    .color(egui::Color32::from_rgb(250, 150, 50));
 
-                Plot::new("mag_plot")
-                    .view_aspect(2.0) // Соотношение сторон
+                Plot::new("vertical_mag_plot")
                     .include_y(-1.1)
                     .include_y(1.1)
-                    .show(ui, |plot_ui| plot_ui.line(line_mag));
-
-                ui.add_space(20.0);
-
-                ui.label("Energy:");
-                let line_energy = Line::new(PlotPoints::new(self.history_energy.clone()))
-                    .color(egui::Color32::from_rgb(50, 50, 200));
-
-                Plot::new("energy_plot")
-                    .view_aspect(2.0)
-                    .include_y(-2.1)
-                    .include_y(0.1)
-                    .show(ui, |plot_ui| plot_ui.line(line_energy));
-
-                ui.add_space(20.0);
-
-                ui.label("Susceptibility:");
-                let line_susceptibility =
-                    Line::new(PlotPoints::new(self.history_susceptibility.clone()))
-                        .color(egui::Color32::from_rgb(50, 200, 50));
-
-                Plot::new("susceptibility_plot")
-                    .view_aspect(2.0)
-                    .include_y(-0.1)
-                    .show(ui, |plot_ui| plot_ui.line(line_susceptibility));
+                    .show(ui, |plot_ui| plot_ui.line(line));
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
