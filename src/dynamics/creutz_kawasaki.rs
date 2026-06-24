@@ -88,13 +88,9 @@ impl CreutzKawasakiDynamics {
         for i in 0..model.l {
             let idx_l = i * model.l;
             let idx_r = (i + 1) * model.l - 1;
-
-            let flipped_l = self
-                .rng
-                .random_bool(f64::midpoint(1.0, model.lattice[idx_l] as f64 * self.m));
-            let flipped_r = self
-                .rng
-                .random_bool(f64::midpoint(1.0, -model.lattice[idx_r] as f64 * self.m));
+            
+            let flipped_l = self.rng.random_bool((1.0 + model.lattice[idx_l] as f64 * self.m) / 2.0);
+            let flipped_r = self.rng.random_bool((1.0 - model.lattice[idx_r] as f64 * self.m) / 2.0);
 
             if flipped_l {
                 model.flip(idx_l, model.flip_energy_delta(idx_l));
