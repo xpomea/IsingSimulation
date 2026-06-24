@@ -39,10 +39,8 @@ impl MetropolisDynamics {
     
     fn step(&mut self, model: &mut IsingModel) {
         let idx = self.rng.random_range(0..model.l * model.l);
-        let i = idx / model.l;
-        let j = idx - i * model.l;
 
-        let energy_delta = model.flip_energy_delta(i, j, idx);
+        let energy_delta = model.flip_energy_delta(idx);
         let flip_prob = self.flip_probabilities[(energy_delta / 4 + 2) as usize];
         let flipped = self.rng.random_bool(flip_prob.clamp(0.0, 1.0));
 

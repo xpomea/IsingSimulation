@@ -5,7 +5,7 @@ use std::time::Instant;
 mod dynamics;
 mod ising_model;
 use dynamics::{Dynamics, MetropolisDynamics};
-use ising_model::{InitialCondition, IsingModel};
+use ising_model::{InitialCondition, IsingModel, BoundaryCondition};
 
 struct IsingApp {
     model: IsingModel,
@@ -26,7 +26,7 @@ struct IsingApp {
 impl Default for IsingApp {
     fn default() -> Self {
         return Self {
-            model: IsingModel::new(100, InitialCondition::Random),
+            model: IsingModel::new(100, InitialCondition::Random, BoundaryCondition::Periodic),
             dynamics: Dynamics::Metropolis(MetropolisDynamics::new(2.269)),
             steps_per_frame: 10,
             is_running: false,
@@ -127,18 +127,21 @@ impl eframe::App for IsingApp {
                 self.model = IsingModel::new(
                     self.model.l,
                     InitialCondition::Random,
+                    BoundaryCondition::Shifted,
                 );
             }
             if ui.button("All +1").clicked() {
                 self.model = IsingModel::new(
                     self.model.l,
                     InitialCondition::AllUp,
+                    BoundaryCondition::Shifted,
                 );
             }
             if ui.button("All -1").clicked() {
                 self.model = IsingModel::new(
                     self.model.l,
                     InitialCondition::AllDown,
+                    BoundaryCondition::Shifted,
                 );
             }
 

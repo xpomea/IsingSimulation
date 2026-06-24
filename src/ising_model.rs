@@ -7,6 +7,11 @@ pub enum InitialCondition {
     Random,
 }
 
+pub enum BoundaryCondition {
+    Periodic,
+    Shifted,
+}
+
 pub struct IsingModel {
     pub l: usize,
     pub lattice: Vec<i32>,
@@ -16,7 +21,7 @@ pub struct IsingModel {
 }
 
 impl IsingModel {
-    pub fn new(l: usize, ic: InitialCondition) -> Self { 
+    pub fn new(l: usize, ic: InitialCondition, bc: BoundaryCondition) -> Self { 
         let mut rng: SmallRng = rand::make_rng();
 
         let mut lattice = Vec::with_capacity(l * l);
@@ -29,11 +34,46 @@ impl IsingModel {
             lattice.push(val);
         }
 
+        let mut neighbors = Vec::with_capacity(l * l);
+        for i in 0..l {
+            for j in 0..l {
+                let idx_top = if i == 0 { (l - 1) * l + j } else { (i - 1) * l + j };
+                let idx_bottom = if i == l - 1 { j } else { (i + 1) * l + j };
+                
+                let idx_right = if j == l - 1 {
+                    match bc {
+                        BoundaryCondition::Periodic => i * l,
+                        BoundaryCondition::Shifted => {
+                            let shifted_i = (i + l - l / 4) % l;
+                            shifted_i * l + j
+                        }
+                    }
+                } else {
+                    i * l + j + 1
+                };
+                
+                let idx_left = if j == 0 {
+                    match bc {
+                        BoundaryCondition::Periodic => (i + 1) * l - 1,
+                        BoundaryCondition::Shifted => {
+                            let shifted_i = (i + l - l / 4) % l;
+                            shifted_i * l + j
+                        }
+                    }
+                } else {
+                    i * l + j - 1
+                };
+                
+                neighbors.push([idx_top, idx_right, idx_bottom, idx_left]);
+            }
+        }
+
         let mut model = Self {
             l,
             lattice,
             energy: 0,
             total_spin: 0,
+            neighbors,
         };
 
         model.energy = model.compute_energy_int();
@@ -44,14 +84,10 @@ impl IsingModel {
 
     pub fn compute_energy_int(&self) -> i32 {
         let mut energy = 0;
-        for i in 0..self.l {
-            for j in 0..self.l {
-                let idx = i * self.l + j;
-                let idx_bottom = if i == self.l - 1 { j } else { (i + 1) * self.l + j };
-                let idx_right = if j == self.l - 1 { i * self.l } else { i * self.l + j + 1 };
-
-                energy += self.lattice[idx] * (self.lattice[idx_right] + self.lattice[idx_bottom]);
-            }
+        for idx in 0..self.l * self.l {
+            let idx_right = self.neighbors[idx][1];
+            let idx_bottom = self.neighbors[idx][2];
+            energy -= self.lattice[idx] * (self.lattice[idx_right] + self.lattice[idx_bottom]);
         }
         return energy;
     }
@@ -68,16 +104,11 @@ impl IsingModel {
         return self.total_spin as f64 / (self.l * self.l) as f64;
     }
 
-    pub fn flip_energy_delta(&self, i: usize, j: usize, idx: usize) -> i32 {
-        let idx_top = if i == 0 { (self.l - 1) * self.l + j } else { (i - 1) * self.l + j };
-        let idx_bottom = if i == self.l - 1 { j } else { (i + 1) * self.l + j };
-        let idx_right = if j == self.l - 1 { i * self.l } else { i * self.l + j + 1 };
-        let idx_left = if j == 0 { (i + 1) * self.l - 1 } else { i * self.l + j - 1 };
-
-        let sum_neighbors = self.lattice[idx_left]
-            + self.lattice[idx_top]
-            + self.lattice[idx_right]
-            + self.lattice[idx_bottom];
+    pub fn flip_energy_delta(&self, idx: usize) -> i32 {
+        let sum_neighbors = self.lattice[self.neighbors[idx][0]]
+            + self.lattice[self.neighbors[idx][1]]
+            + self.lattice[self.neighbors[idx][2]]
+            + self.lattice[self.neighbors[idx][3]];
 
         let alignment = self.lattice[idx] * sum_neighbors;
 
@@ -90,11 +121,15 @@ impl IsingModel {
         self.total_spin += 2 * self.lattice[idx];
     }
 
-    pub fn swap_energy_delta(&self) -> i32 {
-
+    pub fn swap_energy_delta(&self, idx1: usize, idx2: usize) -> i32 {
+        // Assumes spins are adjacent and different!
+        return self.flip_energy_delta(idx1) + self.flip_energy_delta(idx2) + 4;
     }
 
-    pub fn swap(&mut self) {
-        
+    pub fn swap(&mut self, idx1: usize, idx2: usize, energy_delta: i32) {
+        // Assumes spins have different signs!
+        self.lattice[idx1] *= -1;
+        self.lattice[idx2] *= -1;
+        self.energy += energy_delta;
     }
 }
