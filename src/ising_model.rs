@@ -12,6 +12,7 @@ pub struct IsingModel {
     pub lattice: Vec<i32>,
     pub energy: i32,
     pub total_spin: i32,
+    pub neighbors: Vec<[usize; 4]>,
 }
 
 impl IsingModel {
@@ -87,5 +88,13 @@ impl IsingModel {
         self.lattice[idx] *= -1;
         self.energy += energy_delta;
         self.total_spin += 2 * self.lattice[idx];
+    }
+
+    pub fn swap_energy_delta(&self) -> i32 {
+
+    }
+
+    pub fn swap(&mut self) {
+        
     }
 }
