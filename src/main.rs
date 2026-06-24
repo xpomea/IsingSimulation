@@ -74,6 +74,7 @@ impl eframe::App for IsingApp {
             
             let beta = match &self.dynamics {
                 Dynamics::Metropolis(d) => d.beta,
+                _ => 1.0,
             };
 
             let current_susceptibility = beta
@@ -116,7 +117,8 @@ impl eframe::App for IsingApp {
                     {
                         metro.set_temperature(temp);
                     }
-                }
+                },
+                _ => {}
             }
 
             ui.separator();
