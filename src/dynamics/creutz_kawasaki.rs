@@ -6,6 +6,7 @@ pub struct CreutzKawasakiDynamics {
     pub m: f64,
     pub demons_h: Vec<i32>,
     pub demons_v: Vec<i32>,
+    pub current_h: Vec<f64>,
 
     rng: SmallRng,
 }
@@ -14,10 +15,12 @@ impl CreutzKawasakiDynamics {
     pub fn new(l: usize, m: f64, starting_energy: i32) -> Self {
         let mut demons_h = Vec::new();
         let mut demons_v = Vec::new();
-        for i in 0..l * l {
+        for _ in 0..l * l {
             demons_h.push(starting_energy);
             demons_v.push(starting_energy);
         }
+
+        let current_h = vec![0.0; l.saturating_sub(1)];
 
         let rng: SmallRng = rand::make_rng();
 
@@ -25,6 +28,7 @@ impl CreutzKawasakiDynamics {
             m,
             demons_h,
             demons_v,
+            current_h,
             rng,
         };
     }
@@ -41,8 +45,10 @@ impl CreutzKawasakiDynamics {
 
                 let energy_delta = model.swap_energy_delta(idx1, idx2);
                 if energy_delta <= self.demons_h[idx1] {
+                    let current = model.lattice[idx1] as f64;
                     model.swap(idx1, idx2, energy_delta);
                     self.demons_h[idx1] -= energy_delta;
+                    self.current_h[x] += current * 0.01;
                 }
             }
         }
@@ -57,8 +63,10 @@ impl CreutzKawasakiDynamics {
 
                 let energy_delta = model.swap_energy_delta(idx1, idx2);
                 if energy_delta <= self.demons_h[idx1] {
+                    let current = model.lattice[idx1] as f64;
                     model.swap(idx1, idx2, energy_delta);
                     self.demons_h[idx1] -= energy_delta;
+                    self.current_h[x] += current * 0.01;
                 }
             }
         }
@@ -118,6 +126,9 @@ impl CreutzKawasakiDynamics {
     }
 
     pub fn sweep(&mut self, model: &mut IsingModel) {
+        for c in self.current_h.iter_mut() {
+            *c *= 0.99;
+        }
         self.process_bonds(model);
         self.process_reservoirs(model);
     }

@@ -30,7 +30,7 @@ impl Default for IsingApp {
         let l = 100;
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
-            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.8, 8)),
+            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.999, 24)),
             steps_per_frame: 10,
             is_running: false,
             texture: None,
@@ -220,9 +220,9 @@ impl eframe::App for IsingApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 let available_size = ui.available_size();
-                let plot_height = 150.0;
+                let plot_height = 100.0;
                 let spacing = 10.0;
-                let side = available_size.x.min(available_size.y - plot_height - spacing).max(1.0);
+                let side = available_size.x.min(available_size.y - 2.0 * plot_height - 3.0 * spacing).max(1.0);
 
                 let start = Instant::now();
                 self.draw_lattice(ui, ctx, side);
@@ -252,6 +252,25 @@ impl eframe::App for IsingApp {
                     .include_y(-1.1)
                     .include_y(1.1)
                     .show(ui, |plot_ui| plot_ui.line(line));
+
+                ui.add_space(spacing);
+
+                if let Dynamics::CreutzKawasaki(creutz) = &self.dynamics {
+                    let current_points: Vec<[f64; 2]> = creutz.current_h
+                        .iter()
+                        .enumerate()
+                        .map(|(x, &c)| [x as f64, c])
+                        .collect();
+                    let line_current = Line::new(PlotPoints::new(current_points))
+                        .color(egui::Color32::from_rgb(50, 200, 250));
+
+                    Plot::new("spin_current_plot")
+                        .height(plot_height)
+                        .width(side)
+                        .include_y(-0.5)
+                        .include_y(0.5)
+                        .show(ui, |plot_ui| plot_ui.line(line_current));
+                }
             });
         });
     }
