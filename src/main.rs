@@ -30,7 +30,7 @@ impl Default for IsingApp {
         let l = 100;
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
-            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.999, 8)),
+            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.8, 8)),
             steps_per_frame: 10,
             is_running: false,
             texture: None,
@@ -217,11 +217,18 @@ impl eframe::App for IsingApp {
         //             .show(ui, |plot_ui| plot_ui.line(line_susceptibility));
         //     });
 
-        egui::TopBottomPanel::bottom("bottom_plot")
-            .resizable(true)
-            .min_height(150.0)
-            .show(ctx, |ui| {
-                ui.heading("Vertical Magnetization Profile");
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical(|ui| {
+                let available_size = ui.available_size();
+                let plot_height = 150.0;
+                let spacing = 10.0;
+                let side = available_size.x.min(available_size.y - plot_height - spacing).max(1.0);
+
+                let start = Instant::now();
+                self.draw_lattice(ui, ctx, side);
+                self.last_draw_time_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+                ui.add_space(spacing);
 
                 let mut col_mag = vec![0.0; self.model.l];
                 for x in 0..self.model.l {
@@ -240,21 +247,18 @@ impl eframe::App for IsingApp {
                     .color(egui::Color32::from_rgb(250, 150, 50));
 
                 Plot::new("vertical_mag_plot")
+                    .height(plot_height)
+                    .width(side)
                     .include_y(-1.1)
                     .include_y(1.1)
                     .show(ui, |plot_ui| plot_ui.line(line));
             });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let start = Instant::now();
-            self.draw_lattice(ui, ctx);
-            self.last_draw_time_ms = start.elapsed().as_secs_f64() * 1000.0;
         });
     }
 }
 
 impl IsingApp {
-    fn draw_lattice(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn draw_lattice(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, side: f32) {
         let l = self.model.l;
         let mut pixels = vec![egui::Color32::BLACK; l * l];
 
@@ -278,8 +282,6 @@ impl IsingApp {
         }
 
         if let Some(texture) = &self.texture {
-            let available_size = ui.available_size();
-            let side = available_size.x.min(available_size.y);
             ui.image((texture.id(), egui::vec2(side, side)));
         }
     }
