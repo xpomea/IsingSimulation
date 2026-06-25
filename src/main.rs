@@ -30,7 +30,7 @@ impl Default for IsingApp {
         let l = 100;
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
-            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.999, 24)),
+            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.9999, 0)),
             steps_per_frame: 10,
             is_running: false,
             texture: None,
@@ -220,9 +220,9 @@ impl eframe::App for IsingApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 let available_size = ui.available_size();
-                let plot_height = 100.0;
+                let plot_height = 80.0;
                 let spacing = 10.0;
-                let side = available_size.x.min(available_size.y - 2.0 * plot_height - 3.0 * spacing).max(1.0);
+                let side = available_size.x.min(available_size.y - 3.0 * plot_height - 4.0 * spacing).max(1.0);
 
                 let start = Instant::now();
                 self.draw_lattice(ui, ctx, side);
@@ -270,6 +270,34 @@ impl eframe::App for IsingApp {
                         .include_y(-0.5)
                         .include_y(0.5)
                         .show(ui, |plot_ui| plot_ui.line(line_current));
+
+                    ui.add_space(spacing);
+
+                    let mut col_demon = vec![0.0; self.model.l];
+                    for x in 0..self.model.l {
+                        let mut sum = 0;
+                        for y in 0..self.model.l {
+                            let idx = y * self.model.l + x;
+                            sum += creutz.demons_v[idx];
+                            if x < self.model.l - 1 {
+                                sum += creutz.demons_h[idx];
+                            }
+                        }
+                        col_demon[x] = sum as f64;
+                    }
+                    let demon_points: Vec<[f64; 2]> = col_demon
+                        .into_iter()
+                        .enumerate()
+                        .map(|(x, e)| [x as f64, e])
+                        .collect();
+                    let line_demon = Line::new(PlotPoints::new(demon_points))
+                        .color(egui::Color32::from_rgb(200, 50, 200));
+
+                    Plot::new("demon_energy_plot")
+                        .height(plot_height)
+                        .width(side)
+                        .include_y(0.0)
+                        .show(ui, |plot_ui| plot_ui.line(line_demon));
                 }
             });
         });
@@ -308,7 +336,7 @@ impl IsingApp {
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 600.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([900.0, 900.0]),
         ..Default::default()
     };
     eframe::run_native(
