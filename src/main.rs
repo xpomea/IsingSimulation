@@ -30,7 +30,7 @@ impl Default for IsingApp {
         let l = 100;
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
-            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.9999, 0)),
+            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.997, 80)),
             steps_per_frame: 10,
             is_running: false,
             texture: None,
@@ -108,7 +108,7 @@ impl eframe::App for IsingApp {
             }
 
             ui.add(
-                egui::Slider::new(&mut self.steps_per_frame, 1..=100).text("Speed (sweeps/frame)"),
+                egui::Slider::new(&mut self.steps_per_frame, 1..=1000).text("Speed (sweeps/frame)"),
             );
 
             match &mut self.dynamics {
@@ -220,9 +220,12 @@ impl eframe::App for IsingApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 let available_size = ui.available_size();
-                let plot_height = 80.0;
+                let plot_height = 60.0;
                 let spacing = 10.0;
-                let side = available_size.x.min(available_size.y - 3.0 * plot_height - 4.0 * spacing).max(1.0);
+                let side = available_size
+                    .x
+                    .min(available_size.y - 4.0 * plot_height - 5.0 * spacing)
+                    .max(1.0);
 
                 let start = Instant::now();
                 self.draw_lattice(ui, ctx, side);
@@ -243,8 +246,8 @@ impl eframe::App for IsingApp {
                     .enumerate()
                     .map(|(x, m)| [x as f64, m])
                     .collect();
-                let line = Line::new(PlotPoints::new(points))
-                    .color(egui::Color32::from_rgb(250, 150, 50));
+                let line =
+                    Line::new(PlotPoints::new(points)).color(egui::Color32::from_rgb(250, 150, 50));
 
                 Plot::new("vertical_mag_plot")
                     .height(plot_height)
@@ -256,10 +259,11 @@ impl eframe::App for IsingApp {
                 ui.add_space(spacing);
 
                 if let Dynamics::CreutzKawasaki(creutz) = &self.dynamics {
-                    let current_points: Vec<[f64; 2]> = creutz.current_h
+                    let current_points: Vec<[f64; 2]> = creutz
+                        .current_h
                         .iter()
                         .enumerate()
-                        .map(|(x, &c)| [x as f64, c])
+                        .map(|(x, &c)| [x as f64, c as f64 / self.time_step])
                         .collect();
                     let line_current = Line::new(PlotPoints::new(current_points))
                         .color(egui::Color32::from_rgb(50, 200, 250));
@@ -267,37 +271,56 @@ impl eframe::App for IsingApp {
                     Plot::new("spin_current_plot")
                         .height(plot_height)
                         .width(side)
-                        .include_y(-0.5)
-                        .include_y(0.5)
+                        // .include_y(-0.5)
+                        // .include_y(0.5)
                         .show(ui, |plot_ui| plot_ui.line(line_current));
 
                     ui.add_space(spacing);
 
-                    let mut col_demon = vec![0.0; self.model.l];
+                    let mut col_demon_v = vec![0.0; self.model.l];
+                    let mut col_demon_h = vec![0.0; self.model.l];
                     for x in 0..self.model.l {
-                        let mut sum = 0;
+                        let mut sum_v = 0;
+                        let mut sum_h = 0;
                         for y in 0..self.model.l {
                             let idx = y * self.model.l + x;
-                            sum += creutz.demons_v[idx];
+                            sum_v += creutz.demons_v[idx];
                             if x < self.model.l - 1 {
-                                sum += creutz.demons_h[idx];
+                                sum_h += creutz.demons_h[idx];
                             }
                         }
-                        col_demon[x] = sum as f64;
+                        col_demon_v[x] = sum_v as f64 / self.model.l as f64;
+                        col_demon_h[x] = sum_h as f64 / self.model.l as f64;
                     }
-                    let demon_points: Vec<[f64; 2]> = col_demon
+                    let demon_v_points: Vec<[f64; 2]> = col_demon_v
                         .into_iter()
                         .enumerate()
                         .map(|(x, e)| [x as f64, e])
                         .collect();
-                    let line_demon = Line::new(PlotPoints::new(demon_points))
+                    let line_demon_v = Line::new(PlotPoints::new(demon_v_points))
                         .color(egui::Color32::from_rgb(200, 50, 200));
 
-                    Plot::new("demon_energy_plot")
+                    Plot::new("demon_energy_v_plot")
                         .height(plot_height)
                         .width(side)
                         .include_y(0.0)
-                        .show(ui, |plot_ui| plot_ui.line(line_demon));
+                        .show(ui, |plot_ui| plot_ui.line(line_demon_v));
+
+                    ui.add_space(spacing);
+
+                    let demon_h_points: Vec<[f64; 2]> = col_demon_h
+                        .into_iter()
+                        .enumerate()
+                        .map(|(x, e)| [x as f64, e])
+                        .collect();
+                    let line_demon_h = Line::new(PlotPoints::new(demon_h_points))
+                        .color(egui::Color32::from_rgb(200, 100, 250));
+
+                    Plot::new("demon_energy_h_plot")
+                        .height(plot_height)
+                        .width(side)
+                        .include_y(0.0)
+                        .show(ui, |plot_ui| plot_ui.line(line_demon_h));
                 }
             });
         });
