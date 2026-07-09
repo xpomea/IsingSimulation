@@ -7,7 +7,7 @@ mod ising_model;
 use dynamics::{Dynamics, MetropolisDynamics};
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
-use crate::dynamics::CreutzKawasakiDynamics;
+use crate::dynamics::{CreutzKawasakiDynamics, CreutzKawasakiRandomDynamics};
 
 struct IsingApp {
     model: IsingModel,
@@ -27,10 +27,12 @@ struct IsingApp {
 
 impl Default for IsingApp {
     fn default() -> Self {
-        let l = 100;
+        let l = 40;
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
-            dynamics: Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(l, 0.997, 80)),
+            dynamics: Dynamics::CreutzKawasakiRandom(CreutzKawasakiRandomDynamics::new(
+                l, 0.998, 4,
+            )),
             steps_per_frame: 10,
             is_running: false,
             texture: None,
@@ -122,6 +124,13 @@ impl eframe::App for IsingApp {
                     }
                 }
                 Dynamics::CreutzKawasaki(creutz) => {
+                    let sum_h: i32 = creutz.demons_h.iter().sum();
+                    let sum_v: i32 = creutz.demons_v.iter().sum();
+                    let total_demons = creutz.demons_h.len() + creutz.demons_v.len();
+                    let avg_demon_energy = (sum_h + sum_v) as f64 / total_demons as f64;
+                    ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
+                }
+                Dynamics::CreutzKawasakiRandom(creutz) => {
                     let sum_h: i32 = creutz.demons_h.iter().sum();
                     let sum_v: i32 = creutz.demons_v.iter().sum();
                     let total_demons = creutz.demons_h.len() + creutz.demons_v.len();
@@ -258,9 +267,17 @@ impl eframe::App for IsingApp {
 
                 ui.add_space(spacing);
 
-                if let Dynamics::CreutzKawasaki(creutz) = &self.dynamics {
-                    let current_points: Vec<[f64; 2]> = creutz
-                        .current_h
+                // Extract demon data for plotting (works for both CreutzKawasaki variants)
+                let creutz_data: Option<(&Vec<i32>, &Vec<i32>, &Vec<i32>)> = match &self.dynamics {
+                    Dynamics::CreutzKawasaki(c) => Some((&c.demons_h, &c.demons_v, &c.current_h)),
+                    Dynamics::CreutzKawasakiRandom(c) => {
+                        Some((&c.demons_h, &c.demons_v, &c.current_h))
+                    }
+                    _ => None,
+                };
+
+                if let Some((demons_h, demons_v, current_h)) = creutz_data {
+                    let current_points: Vec<[f64; 2]> = current_h
                         .iter()
                         .enumerate()
                         .map(|(x, &c)| [x as f64, c as f64 / self.time_step])
@@ -284,9 +301,9 @@ impl eframe::App for IsingApp {
                         let mut sum_h = 0;
                         for y in 0..self.model.l {
                             let idx = y * self.model.l + x;
-                            sum_v += creutz.demons_v[idx];
+                            sum_v += demons_v[idx];
                             if x < self.model.l - 1 {
-                                sum_h += creutz.demons_h[idx];
+                                sum_h += demons_h[idx];
                             }
                         }
                         col_demon_v[x] = sum_v as f64 / self.model.l as f64;

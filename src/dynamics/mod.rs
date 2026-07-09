@@ -2,13 +2,16 @@ use crate::ising_model::IsingModel;
 
 pub mod metropolis;
 pub mod creutz_kawasaki;
+pub mod creutz_kawasaki_random;
 
 pub use metropolis::MetropolisDynamics;
 pub use creutz_kawasaki::CreutzKawasakiDynamics;
+pub use creutz_kawasaki_random::CreutzKawasakiRandomDynamics;
 
 pub enum Dynamics {
     Metropolis(MetropolisDynamics),
     CreutzKawasaki(CreutzKawasakiDynamics),
+    CreutzKawasakiRandom(CreutzKawasakiRandomDynamics),
 }
 
 impl Dynamics {
@@ -16,6 +19,7 @@ impl Dynamics {
         match self {
             Dynamics::Metropolis(d) => d.sweep(model),
             Dynamics::CreutzKawasaki(d) => d.sweep(model),
+            Dynamics::CreutzKawasakiRandom(d) => d.sweep(model),
         }
     }
 }
