@@ -8,12 +8,9 @@ pub struct CreutzKawasakiRandomDynamics {
     pub demons_v: Vec<i32>,
     pub current_h: Vec<i32>,
 
-    // Compact precomputed edge table.
-    // Internal bonds: [idx1, idx2]. Reservoir bonds: [idx, side].
-    // 8 bytes per edge (~160KB for L=100, fits in L2).
     edges: Vec<[u32; 2]>,
     n_horizontal: usize,
-    n_internal: usize, // n_horizontal + n_vertical
+    n_internal: usize,
     n_total: usize,
 
     rng: SmallRng,
@@ -53,7 +50,7 @@ impl CreutzKawasakiRandomDynamics {
             }
         }
 
-        // Reservoir bonds: [site_idx, side]  (side: 0 = left/+m, 1 = right/-m)
+        // Reservoir bonds
         for y in 0..l {
             edges.push([(y * l) as u32, 0]);
             edges.push([((y + 1) * l - 1) as u32, 1]);
@@ -72,49 +69,49 @@ impl CreutzKawasakiRandomDynamics {
         }
     }
 
-    pub fn sweep(&mut self, model: &mut IsingModel) {
-        let n_total = self.n_total;
-        let n_horizontal = self.n_horizontal;
-        let n_internal = self.n_internal;
+    fn step(&mut self, model: &mut IsingModel) {
+        let r = self.rng.random_range(0..self.n_total);
+        let e = self.edges[r];
+        let a = e[0] as usize;
 
-        for _ in 0..n_total {
-            let r = self.rng.random_range(0..n_total);
-            let e = self.edges[r];
-            let a = e[0] as usize;
+        if r < self.n_internal {
+            // Internal bond (horizontal or vertical)
+            let b = e[1] as usize;
 
-            if r < n_internal {
-                // Internal bond (horizontal or vertical)
-                let b = e[1] as usize;
+            if model.lattice[a] == model.lattice[b] {
+                return;
+            }
 
-                if model.lattice[a] == model.lattice[b] {
-                    continue;
-                }
+            let energy_delta = model.swap_energy_delta(a, b);
 
-                let energy_delta = model.swap_energy_delta(a, b);
-
-                if r < n_horizontal {
-                    // Horizontal
-                    if energy_delta <= self.demons_h[a] {
-                        let x = a % model.l;
-                        self.current_h[x] += model.lattice[a];
-                        model.swap(a, b, energy_delta);
-                        self.demons_h[a] -= energy_delta;
-                    }
-                } else {
-                    // Vertical
-                    if energy_delta <= self.demons_v[a] {
-                        model.swap(a, b, energy_delta);
-                        self.demons_v[a] -= energy_delta;
-                    }
+            if r < self.n_horizontal {
+                // Horizontal
+                if energy_delta <= self.demons_h[a] {
+                    let x = a % model.l;
+                    self.current_h[x] += model.lattice[a];
+                    model.swap(a, b, energy_delta);
+                    self.demons_h[a] -= energy_delta;
                 }
             } else {
-                // Reservoir bond
-                let sign = 1.0 - 2.0 * e[1] as f64;
-                let flip_prob = (1.0 + sign * model.lattice[a] as f64 * self.m) / 2.0;
-                if self.rng.random_bool(flip_prob) {
-                    model.flip(a, model.flip_energy_delta(a));
+                // Vertical
+                if energy_delta <= self.demons_v[a] {
+                    model.swap(a, b, energy_delta);
+                    self.demons_v[a] -= energy_delta;
                 }
             }
+        } else {
+            // Reservoir bond
+            let sign = 1.0 - 2.0 * e[1] as f64;
+            let flip_prob = (1.0 + sign * model.lattice[a] as f64 * self.m) / 2.0;
+            if self.rng.random_bool(flip_prob) {
+                model.flip(a, model.flip_energy_delta(a));
+            }
+        }
+    }
+
+    pub fn sweep(&mut self, model: &mut IsingModel) {
+        for _ in 0..self.n_total {
+            self.step(model);
         }
     }
 }
