@@ -20,7 +20,7 @@ impl MetropolisDynamics {
             rng,
         };
         d.precompute_flip_probabilities();
-        d
+        return d
     }
 
     pub fn set_temperature(&mut self, temp: f64) {
@@ -33,16 +33,16 @@ impl MetropolisDynamics {
         self.flip_probabilities = [-8.0, -4.0, 0.0, 4.0, 8.0];
         for i in 0..5 {
             self.flip_probabilities[i] =
-                f64::exp(-self.beta * self.flip_probabilities[i]);
+                f64::exp(-self.beta * self.flip_probabilities[i]).clamp(0.0, 1.0);
         }
     }
-    
+
     fn step(&mut self, model: &mut IsingModel) {
         let idx = self.rng.random_range(0..model.l * model.l);
 
         let energy_delta = model.flip_energy_delta(idx);
         let flip_prob = self.flip_probabilities[(energy_delta / 4 + 2) as usize];
-        let flipped = self.rng.random_bool(flip_prob.clamp(0.0, 1.0));
+        let flipped = self.rng.random_bool(flip_prob);
 
         if flipped {
             model.flip(idx, energy_delta);
