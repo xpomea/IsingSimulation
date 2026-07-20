@@ -7,7 +7,7 @@ mod ising_model;
 use dynamics::{Dynamics, MetropolisDynamics};
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
-use crate::dynamics::{CreutzKawasakiDynamics, CreutzKawasakiRandomDynamics};
+use crate::dynamics::{CreutzKawasakiDynamics, CreutzKawasakiRandomDynamics, KawasakiDynamics};
 
 struct IsingApp {
     model: IsingModel,
@@ -30,8 +30,8 @@ impl Default for IsingApp {
         let l = 40;
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
-            dynamics: Dynamics::CreutzKawasakiRandom(CreutzKawasakiRandomDynamics::new(
-                l, 0.998, 4,
+            dynamics: Dynamics::Kawasaki(KawasakiDynamics::new(
+                l, 1.0, 0.9993,
             )),
             steps_per_frame: 10,
             is_running: false,
@@ -79,6 +79,7 @@ impl eframe::App for IsingApp {
 
             let beta = match &self.dynamics {
                 Dynamics::Metropolis(d) => d.beta,
+                Dynamics::Kawasaki(d) => d.beta,
                 _ => 1.0,
             };
 
@@ -136,6 +137,10 @@ impl eframe::App for IsingApp {
                     let total_demons = creutz.demons_h.len() + creutz.demons_v.len();
                     let avg_demon_energy = (sum_h + sum_v) as f64 / total_demons as f64;
                     ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
+                }
+                Dynamics::Kawasaki(kd) => {
+                    ui.label(format!("β = {:.3}", kd.beta));
+                    ui.label(format!("m+ = {:.6}", kd.m_plus));
                 }
             }
 
@@ -267,7 +272,13 @@ impl eframe::App for IsingApp {
 
                 ui.add_space(spacing);
 
-                // Extract demon data for plotting (works for both CreutzKawasaki variants)
+                let current_h_data: Option<&Vec<i32>> = match &self.dynamics {
+                    Dynamics::CreutzKawasaki(c) => Some(&c.current_h),
+                    Dynamics::CreutzKawasakiRandom(c) => Some(&c.current_h),
+                    Dynamics::Kawasaki(c) => Some(&c.current_h),
+                    _ => None,
+                };
+
                 let creutz_data: Option<(&Vec<i32>, &Vec<i32>, &Vec<i32>)> = match &self.dynamics {
                     Dynamics::CreutzKawasaki(c) => Some((&c.demons_h, &c.demons_v, &c.current_h)),
                     Dynamics::CreutzKawasakiRandom(c) => {
@@ -276,7 +287,7 @@ impl eframe::App for IsingApp {
                     _ => None,
                 };
 
-                if let Some((demons_h, demons_v, current_h)) = creutz_data {
+                if let Some(current_h) = current_h_data {
                     let current_points: Vec<[f64; 2]> = current_h
                         .iter()
                         .enumerate()
@@ -288,11 +299,13 @@ impl eframe::App for IsingApp {
                     Plot::new("spin_current_plot")
                         .height(plot_height)
                         .width(side)
-                        // .include_y(-0.5)
-                        // .include_y(0.5)
                         .show(ui, |plot_ui| plot_ui.line(line_current));
 
                     ui.add_space(spacing);
+                }
+
+                if let Some((demons_h, demons_v, _current_h)) = creutz_data {
+
 
                     let mut col_demon_v = vec![0.0; self.model.l];
                     let mut col_demon_h = vec![0.0; self.model.l];
