@@ -1,10 +1,12 @@
 use rand::prelude::*;
 use rand::rngs::SmallRng;
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum InitialCondition {
     AllUp,
     AllDown,
     Random,
+    Instanton,
 }
 
 pub enum BoundaryCondition {
@@ -25,13 +27,16 @@ impl IsingModel {
         let mut rng: SmallRng = rand::make_rng();
 
         let mut lattice = Vec::with_capacity(l * l);
-        for _ in 0..l*l {
-            let val = match ic {
-                InitialCondition::AllUp => 1,
-                InitialCondition::AllDown => -1,
-                InitialCondition::Random => if rng.random::<bool>() { 1 } else { -1 }
-            };
-            lattice.push(val);
+        for _i in 0..l {
+            for j in 0..l {
+                let val = match ic {
+                    InitialCondition::AllUp => 1,
+                    InitialCondition::AllDown => -1,
+                    InitialCondition::Random => if rng.random::<bool>() { 1 } else { -1 },
+                    InitialCondition::Instanton => if j < l / 2 { -1 } else { 1 },
+                };
+                lattice.push(val);
+            }
         }
 
         let mut neighbors = Vec::with_capacity(l * l);

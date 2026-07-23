@@ -39,6 +39,7 @@ struct IsingApp {
 
     selected_dynamics_type: DynamicsType,
     ui_l: usize,
+    ui_initial_condition: InitialCondition,
     ui_bond_selection: BondSelection,
     ui_reservoir_type: ReservoirType,
 
@@ -56,7 +57,7 @@ impl Default for IsingApp {
     fn default() -> Self {
         let l = 40;
         Self {
-            model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
+            model: IsingModel::new(l, InitialCondition::Instanton, BoundaryCondition::Shifted),
             dynamics: Dynamics::Kawasaki(KawasakiDynamics::new(
                 l,
                 1.0,
@@ -80,6 +81,7 @@ impl Default for IsingApp {
 
             selected_dynamics_type: DynamicsType::Kawasaki,
             ui_l: l,
+            ui_initial_condition: InitialCondition::Instanton,
             ui_bond_selection: BondSelection::Random,
             ui_reservoir_type: ReservoirType::Annealed,
             ui_temp: 2.27,
@@ -97,12 +99,13 @@ impl Default for IsingApp {
 impl IsingApp {
     fn reset_col_mag_history(&mut self) {
         self.history_spin_sum = vec![0; self.model.l];
+        self.time_step = 0.0;
     }
 
     fn restart(&mut self) {
         self.model = IsingModel::new(
             self.ui_l,
-            InitialCondition::Random,
+            self.ui_initial_condition,
             BoundaryCondition::Shifted,
         );
         self.dynamics = match self.selected_dynamics_type {
@@ -342,7 +345,17 @@ impl eframe::App for IsingApp {
 
             ui.separator();
             ui.label("Initialization:");
+            if ui.button("Instanton").clicked() {
+                self.ui_initial_condition = InitialCondition::Instanton;
+                self.model = IsingModel::new(
+                    self.model.l,
+                    InitialCondition::Instanton,
+                    BoundaryCondition::Shifted,
+                );
+                self.reset_col_mag_history();
+            }
             if ui.button("Random").clicked() {
+                self.ui_initial_condition = InitialCondition::Random;
                 self.model = IsingModel::new(
                     self.model.l,
                     InitialCondition::Random,
@@ -351,6 +364,7 @@ impl eframe::App for IsingApp {
                 self.reset_col_mag_history();
             }
             if ui.button("All +1").clicked() {
+                self.ui_initial_condition = InitialCondition::AllUp;
                 self.model = IsingModel::new(
                     self.model.l,
                     InitialCondition::AllUp,
@@ -359,11 +373,16 @@ impl eframe::App for IsingApp {
                 self.reset_col_mag_history();
             }
             if ui.button("All -1").clicked() {
+                self.ui_initial_condition = InitialCondition::AllDown;
                 self.model = IsingModel::new(
                     self.model.l,
                     InitialCondition::AllDown,
                     BoundaryCondition::Shifted,
                 );
+                self.reset_col_mag_history();
+            }
+
+            if ui.button("🧹 Clear Profile History").clicked() {
                 self.reset_col_mag_history();
             }
 
