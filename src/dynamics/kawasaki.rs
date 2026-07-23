@@ -1,3 +1,4 @@
+use crate::dynamics::{BondSelection, ReservoirType};
 use crate::ising_model::IsingModel;
 use rand::prelude::*;
 use rand::rngs::SmallRng;
@@ -6,20 +7,34 @@ pub struct KawasakiDynamics {
     pub beta: f64,
     pub m_plus: f64,
     pub current_h: Vec<i32>,
-    
+
     swap_probabilities: [f64; 7],
+
+    bond_selection: BondSelection,
+    reservoir_type: ReservoirType,
 
     edges: Vec<[u32; 2]>,
     n_horizontal: usize,
     n_internal: usize,
     n_total: usize,
 
+    reservoir_left: Vec<i32>,
+    reservoir_right: Vec<i32>,
+    cursor_left: usize,
+    cursor_right: usize,
+
     rng: SmallRng,
 }
 
 impl KawasakiDynamics {
-    pub fn new(l: usize, beta: f64, m_plus: f64) -> Self {
-        let rng: SmallRng = rand::make_rng();
+    pub fn new(
+        l: usize,
+        beta: f64,
+        m_plus: f64,
+        bond_selection: BondSelection,
+        reservoir_type: ReservoirType,
+    ) -> Self {
+        let mut rng: SmallRng = rand::make_rng();
         let current_h = vec![0; l.saturating_sub(1)];
 
         let n_horizontal = l * (l - 1);
@@ -28,48 +43,81 @@ impl KawasakiDynamics {
         let n_internal = n_horizontal + n_vertical;
         let n_total = n_internal + n_reservoir;
 
-        let mut edges = Vec::with_capacity(n_total);
+        let mut edges = Vec::new();
+        if bond_selection == BondSelection::Random {
+            edges.reserve(n_total);
 
-        for y in 0..l {
-            for x in 0..(l - 1) {
-                let idx1 = (y * l + x) as u32;
-                edges.push([idx1, idx1 + 1]);
+            for y in 0..l {
+                for x in 0..(l - 1) {
+                    let idx1 = (y * l + x) as u32;
+                    edges.push([idx1, idx1 + 1]);
+                }
+            }
+
+            for y in 0..l {
+                for x in 0..l {
+                    let idx1 = (y * l + x) as u32;
+                    let idx2 = if y == l - 1 { x as u32 } else { idx1 + l as u32 };
+                    edges.push([idx1, idx2]);
+                }
+            }
+
+            for y in 0..l {
+                edges.push([(y * l) as u32, 0]);
+                edges.push([((y + 1) * l - 1) as u32, 1]);
             }
         }
 
-        for y in 0..l {
-            for x in 0..l {
-                let idx1 = (y * l + x) as u32;
-                let idx2 = if y == l - 1 { x as u32 } else { idx1 + l as u32 };
-                edges.push([idx1, idx2]);
-            }
-        }
-
-        for y in 0..l {
-            edges.push([(y * l) as u32, 0]);
-            edges.push([((y + 1) * l - 1) as u32, 1]);
-        }
+        let (reservoir_left, reservoir_right) = if reservoir_type == ReservoirType::Quenched {
+            let reservoir_size = 10000;
+            (
+                Self::build_reservoir(reservoir_size, -m_plus, &mut rng),
+                Self::build_reservoir(reservoir_size, m_plus, &mut rng),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         let mut dyn_ = Self {
             beta,
             m_plus,
             current_h,
             swap_probabilities: [0.0; 7],
+            bond_selection,
+            reservoir_type,
             edges,
             n_horizontal,
             n_internal,
             n_total,
+            reservoir_left,
+            reservoir_right,
+            cursor_left: 0,
+            cursor_right: 0,
             rng,
         };
         dyn_.precompute_swap_probabilities();
         dyn_
     }
 
+    fn build_reservoir(size: usize, magnetization: f64, rng: &mut SmallRng) -> Vec<i32> {
+        let n_up = ((size as f64) * (1.0 + magnetization) / 2.0).round() as usize;
+        let n_up = n_up.min(size);
+        let mut arr = Vec::with_capacity(size);
+        for _ in 0..n_up {
+            arr.push(1);
+        }
+        for _ in n_up..size {
+            arr.push(-1);
+        }
+        arr.shuffle(rng);
+        arr
+    }
+
     fn precompute_swap_probabilities(&mut self) {
-        self.swap_probabilities = [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0];
+        let delta_hs = [-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0];
         for i in 0..7 {
             self.swap_probabilities[i] =
-                f64::exp(-self.beta * self.swap_probabilities[i]).clamp(0.0, 1.0);
+                f64::exp(-self.beta * delta_hs[i]).clamp(0.0, 1.0);
         }
     }
 
@@ -96,17 +144,149 @@ impl KawasakiDynamics {
                 model.swap(a, b, energy_delta);
             }
         } else {
-            let sign = 1.0 - 2.0 * e[1] as f64;
-            let flip_prob = (1.0 + sign * model.lattice[a] as f64 * self.m_plus) / 2.0;
-            if self.rng.random_bool(flip_prob) {
-                model.flip(a, model.flip_energy_delta(a));
+            match self.reservoir_type {
+                ReservoirType::Annealed => {
+                    let sign = 1.0 - 2.0 * e[1] as f64;
+                    let flip_prob = (1.0 + sign * model.lattice[a] as f64 * self.m_plus) / 2.0;
+                    if self.rng.random_bool(flip_prob) {
+                        model.flip(a, model.flip_energy_delta(a));
+                    }
+                }
+                ReservoirType::Quenched => {
+                    let side = e[1];
+                    let reservoir_spin = if side == 0 {
+                        let s = self.reservoir_left[self.cursor_left];
+                        self.cursor_left = (self.cursor_left + 1) % self.reservoir_left.len();
+                        s
+                    } else {
+                        let s = self.reservoir_right[self.cursor_right];
+                        self.cursor_right = (self.cursor_right + 1) % self.reservoir_right.len();
+                        s
+                    };
+                    if model.lattice[a] != reservoir_spin {
+                        model.flip(a, model.flip_energy_delta(a));
+                    }
+                }
+            }
+        }
+    }
+
+    fn process_bonds_checkerboard(&mut self, model: &mut IsingModel) {
+        for y in 0..model.l {
+            for x in (0..model.l - 1).step_by(2) {
+                let idx1 = y * model.l + x;
+                let idx2 = idx1 + 1;
+                if model.lattice[idx1] == model.lattice[idx2] {
+                    continue;
+                }
+
+                let energy_delta = model.swap_energy_delta(idx1, idx2);
+                let prob = self.swap_probabilities[(energy_delta / 4 + 3) as usize];
+                if self.rng.random_bool(prob) {
+                    let current = model.lattice[idx1];
+                    model.swap(idx1, idx2, energy_delta);
+                    self.current_h[x] += current;
+                }
+            }
+        }
+        for y in 0..model.l {
+            for x in (1..model.l - 1).step_by(2) {
+                let idx1 = y * model.l + x;
+                let idx2 = idx1 + 1;
+                if model.lattice[idx1] == model.lattice[idx2] {
+                    continue;
+                }
+
+                let energy_delta = model.swap_energy_delta(idx1, idx2);
+                let prob = self.swap_probabilities[(energy_delta / 4 + 3) as usize];
+                if self.rng.random_bool(prob) {
+                    let current = model.lattice[idx1];
+                    model.swap(idx1, idx2, energy_delta);
+                    self.current_h[x] += current;
+                }
+            }
+        }
+        for y in (0..model.l).step_by(2) {
+            for x in 0..model.l {
+                let idx1 = y * model.l + x;
+                let idx2 = if y == model.l - 1 { x } else { idx1 + model.l };
+                if model.lattice[idx1] == model.lattice[idx2] {
+                    continue;
+                }
+
+                let energy_delta = model.swap_energy_delta(idx1, idx2);
+                let prob = self.swap_probabilities[(energy_delta / 4 + 3) as usize];
+                if self.rng.random_bool(prob) {
+                    model.swap(idx1, idx2, energy_delta);
+                }
+            }
+        }
+        for y in (1..model.l).step_by(2) {
+            for x in 0..model.l {
+                let idx1 = y * model.l + x;
+                let idx2 = if y == model.l - 1 { x } else { idx1 + model.l };
+                if model.lattice[idx1] == model.lattice[idx2] {
+                    continue;
+                }
+
+                let energy_delta = model.swap_energy_delta(idx1, idx2);
+                let prob = self.swap_probabilities[(energy_delta / 4 + 3) as usize];
+                if self.rng.random_bool(prob) {
+                    model.swap(idx1, idx2, energy_delta);
+                }
+            }
+        }
+    }
+
+    fn process_reservoirs(&mut self, model: &mut IsingModel) {
+        for i in 0..model.l {
+            let idx_l = i * model.l;
+            let idx_r = (i + 1) * model.l - 1;
+
+            match self.reservoir_type {
+                ReservoirType::Annealed => {
+                    let flipped_l = self
+                        .rng
+                        .random_bool((1.0 + model.lattice[idx_l] as f64 * self.m_plus) / 2.0);
+                    let flipped_r = self
+                        .rng
+                        .random_bool((1.0 - model.lattice[idx_r] as f64 * self.m_plus) / 2.0);
+
+                    if flipped_l {
+                        model.flip(idx_l, model.flip_energy_delta(idx_l));
+                    }
+                    if flipped_r {
+                        model.flip(idx_r, model.flip_energy_delta(idx_r));
+                    }
+                }
+                ReservoirType::Quenched => {
+                    let s_l = self.reservoir_left[self.cursor_left];
+                    self.cursor_left = (self.cursor_left + 1) % self.reservoir_left.len();
+                    let s_r = self.reservoir_right[self.cursor_right];
+                    self.cursor_right = (self.cursor_right + 1) % self.reservoir_right.len();
+
+                    if model.lattice[idx_l] != s_l {
+                        model.flip(idx_l, model.flip_energy_delta(idx_l));
+                    }
+                    if model.lattice[idx_r] != s_r {
+                        model.flip(idx_r, model.flip_energy_delta(idx_r));
+                    }
+                }
             }
         }
     }
 
     pub fn sweep(&mut self, model: &mut IsingModel) {
-        for _ in 0..self.n_total {
-            self.step(model);
+        match self.bond_selection {
+            BondSelection::Checkerboard => {
+                self.process_bonds_checkerboard(model);
+                self.process_reservoirs(model);
+            }
+            BondSelection::Random => {
+                for _ in 0..self.n_total {
+                    self.step(model);
+                }
+            }
         }
     }
 }

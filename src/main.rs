@@ -4,10 +4,10 @@ use std::time::Instant;
 
 mod dynamics;
 mod ising_model;
-use dynamics::{Dynamics, MetropolisDynamics};
+use dynamics::Dynamics;
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
-use crate::dynamics::{CreutzKawasakiDynamics, CreutzKawasakiRandomDynamics, KawasakiDynamics, KawasakiReservoirStructDynamics};
+use crate::dynamics::{BondSelection, KawasakiDynamics, ReservoirType};
 
 struct IsingApp {
     model: IsingModel,
@@ -31,7 +31,7 @@ impl Default for IsingApp {
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
             dynamics: Dynamics::Kawasaki(KawasakiDynamics::new(
-                l, 1.0, 0.9995,
+                l, 1.0, 0.9995, BondSelection::Random, ReservoirType::Annealed,
             )),
             steps_per_frame: 10,
             is_running: false,
@@ -80,7 +80,6 @@ impl eframe::App for IsingApp {
             let beta = match &self.dynamics {
                 Dynamics::Metropolis(d) => d.beta,
                 Dynamics::Kawasaki(d) => d.beta,
-                Dynamics::KawasakiReservoirStruct(d) => d.beta,
                 _ => 1.0,
             };
 
@@ -132,18 +131,7 @@ impl eframe::App for IsingApp {
                     let avg_demon_energy = (sum_h + sum_v) as f64 / total_demons as f64;
                     ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
                 }
-                Dynamics::CreutzKawasakiRandom(creutz) => {
-                    let sum_h: i32 = creutz.demons_h.iter().sum();
-                    let sum_v: i32 = creutz.demons_v.iter().sum();
-                    let total_demons = creutz.demons_h.len() + creutz.demons_v.len();
-                    let avg_demon_energy = (sum_h + sum_v) as f64 / total_demons as f64;
-                    ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
-                }
                 Dynamics::Kawasaki(kd) => {
-                    ui.label(format!("β = {:.3}", kd.beta));
-                    ui.label(format!("m+ = {:.6}", kd.m_plus));
-                }
-                Dynamics::KawasakiReservoirStruct(kd) => {
                     ui.label(format!("β = {:.3}", kd.beta));
                     ui.label(format!("m+ = {:.6}", kd.m_plus));
                 }
@@ -195,47 +183,6 @@ impl eframe::App for IsingApp {
             ));
         });
 
-        // egui::SidePanel::right("plots_panel")
-        //     .min_width(300.0)
-        //     .default_width(400.0)
-        //     .show(ctx, |ui| {
-        //         ui.heading("Charts");
-
-        //         ui.label("Magnetism:");
-        //         let line_mag = Line::new(PlotPoints::new(self.history_mag.clone()))
-        //             .color(egui::Color32::from_rgb(200, 50, 50));
-
-        //         Plot::new("mag_plot")
-        //             .view_aspect(2.0) // Соотношение сторон
-        //             .include_y(-1.1)
-        //             .include_y(1.1)
-        //             .show(ui, |plot_ui| plot_ui.line(line_mag));
-
-        //         ui.add_space(20.0);
-
-        //         ui.label("Energy:");
-        //         let line_energy = Line::new(PlotPoints::new(self.history_energy.clone()))
-        //             .color(egui::Color32::from_rgb(50, 50, 200));
-
-        //         Plot::new("energy_plot")
-        //             .view_aspect(2.0)
-        //             .include_y(-2.1)
-        //             .include_y(0.1)
-        //             .show(ui, |plot_ui| plot_ui.line(line_energy));
-
-        //         ui.add_space(20.0);
-
-        //         ui.label("Susceptibility:");
-        //         let line_susceptibility =
-        //             Line::new(PlotPoints::new(self.history_susceptibility.clone()))
-        //                 .color(egui::Color32::from_rgb(50, 200, 50));
-
-        //         Plot::new("susceptibility_plot")
-        //             .view_aspect(2.0)
-        //             .include_y(-0.1)
-        //             .show(ui, |plot_ui| plot_ui.line(line_susceptibility));
-        //     });
-
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 let available_size = ui.available_size();
@@ -279,17 +226,12 @@ impl eframe::App for IsingApp {
 
                 let current_h_data: Option<&Vec<i32>> = match &self.dynamics {
                     Dynamics::CreutzKawasaki(c) => Some(&c.current_h),
-                    Dynamics::CreutzKawasakiRandom(c) => Some(&c.current_h),
                     Dynamics::Kawasaki(c) => Some(&c.current_h),
-                    Dynamics::KawasakiReservoirStruct(c) => Some(&c.current_h),
                     _ => None,
                 };
 
                 let creutz_data: Option<(&Vec<i32>, &Vec<i32>, &Vec<i32>)> = match &self.dynamics {
                     Dynamics::CreutzKawasaki(c) => Some((&c.demons_h, &c.demons_v, &c.current_h)),
-                    Dynamics::CreutzKawasakiRandom(c) => {
-                        Some((&c.demons_h, &c.demons_v, &c.current_h))
-                    }
                     _ => None,
                 };
 
@@ -311,8 +253,6 @@ impl eframe::App for IsingApp {
                 }
 
                 if let Some((demons_h, demons_v, _current_h)) = creutz_data {
-
-
                     let mut col_demon_v = vec![0.0; self.model.l];
                     let mut col_demon_h = vec![0.0; self.model.l];
                     for x in 0..self.model.l {
