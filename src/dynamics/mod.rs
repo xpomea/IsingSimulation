@@ -1,5 +1,6 @@
 use crate::ising_model::IsingModel;
 
+pub mod common;
 pub mod metropolis;
 pub mod kawasaki;
 pub mod creutz_kawasaki;
