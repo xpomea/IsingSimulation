@@ -7,7 +7,7 @@ mod ising_model;
 use dynamics::{Dynamics, MetropolisDynamics};
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
-use crate::dynamics::{CreutzKawasakiDynamics, CreutzKawasakiRandomDynamics, KawasakiDynamics};
+use crate::dynamics::{CreutzKawasakiDynamics, CreutzKawasakiRandomDynamics, KawasakiDynamics, KawasakiReservoirStructDynamics};
 
 struct IsingApp {
     model: IsingModel,
@@ -31,7 +31,7 @@ impl Default for IsingApp {
         return Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
             dynamics: Dynamics::Kawasaki(KawasakiDynamics::new(
-                l, 1.0, 0.9993,
+                l, 1.0, 0.9995,
             )),
             steps_per_frame: 10,
             is_running: false,
@@ -80,6 +80,7 @@ impl eframe::App for IsingApp {
             let beta = match &self.dynamics {
                 Dynamics::Metropolis(d) => d.beta,
                 Dynamics::Kawasaki(d) => d.beta,
+                Dynamics::KawasakiReservoirStruct(d) => d.beta,
                 _ => 1.0,
             };
 
@@ -139,6 +140,10 @@ impl eframe::App for IsingApp {
                     ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
                 }
                 Dynamics::Kawasaki(kd) => {
+                    ui.label(format!("β = {:.3}", kd.beta));
+                    ui.label(format!("m+ = {:.6}", kd.m_plus));
+                }
+                Dynamics::KawasakiReservoirStruct(kd) => {
                     ui.label(format!("β = {:.3}", kd.beta));
                     ui.label(format!("m+ = {:.6}", kd.m_plus));
                 }
@@ -276,6 +281,7 @@ impl eframe::App for IsingApp {
                     Dynamics::CreutzKawasaki(c) => Some(&c.current_h),
                     Dynamics::CreutzKawasakiRandom(c) => Some(&c.current_h),
                     Dynamics::Kawasaki(c) => Some(&c.current_h),
+                    Dynamics::KawasakiReservoirStruct(c) => Some(&c.current_h),
                     _ => None,
                 };
 
