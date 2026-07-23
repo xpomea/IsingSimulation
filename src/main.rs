@@ -8,7 +8,8 @@ use dynamics::Dynamics;
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
 use crate::dynamics::{
-    BondSelection, CreutzKawasakiDynamics, KawasakiDynamics, MetropolisDynamics, ReservoirType,
+    BondSelection, CreutzKawasakiDynamics, CreutzThermalDynamics, DemonReplacementMode,
+    KawasakiDynamics, MetropolisDynamics, ReservoirType,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -16,6 +17,7 @@ enum DynamicsType {
     Metropolis,
     Kawasaki,
     CreutzKawasaki,
+    CreutzThermal,
 }
 
 struct IsingApp {
@@ -45,6 +47,9 @@ struct IsingApp {
     ui_kawasaki_m_plus: f64,
     ui_creutz_m: f64,
     ui_creutz_starting_energy: i32,
+    ui_thermal_beta: f64,
+    ui_thermal_m: f64,
+    ui_demon_replacement: DemonReplacementMode,
 }
 
 impl Default for IsingApp {
@@ -82,6 +87,9 @@ impl Default for IsingApp {
             ui_kawasaki_m_plus: 0.9995,
             ui_creutz_m: 0.997,
             ui_creutz_starting_energy: 80,
+            ui_thermal_beta: 1.0,
+            ui_thermal_m: 0.997,
+            ui_demon_replacement: DemonReplacementMode::PerStep,
         }
     }
 }
@@ -110,6 +118,14 @@ impl IsingApp {
                 self.ui_l,
                 self.ui_creutz_m,
                 self.ui_creutz_starting_energy,
+                self.ui_bond_selection,
+                self.ui_reservoir_type,
+            )),
+            DynamicsType::CreutzThermal => Dynamics::CreutzThermal(CreutzThermalDynamics::new(
+                self.ui_l,
+                self.ui_thermal_m,
+                self.ui_thermal_beta,
+                self.ui_demon_replacement,
                 self.ui_bond_selection,
                 self.ui_reservoir_type,
             )),
@@ -167,6 +183,7 @@ impl eframe::App for IsingApp {
             let beta = match &self.dynamics {
                 Dynamics::Metropolis(d) => d.beta,
                 Dynamics::Kawasaki(d) => d.beta,
+                Dynamics::CreutzThermal(d) => d.beta,
                 _ => 1.0,
             };
 
@@ -209,6 +226,7 @@ impl eframe::App for IsingApp {
                     DynamicsType::Metropolis => "Metropolis",
                     DynamicsType::Kawasaki => "Kawasaki",
                     DynamicsType::CreutzKawasaki => "Creutz-Kawasaki",
+                    DynamicsType::CreutzThermal => "Creutz-Thermal",
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
@@ -225,6 +243,11 @@ impl eframe::App for IsingApp {
                         &mut self.selected_dynamics_type,
                         DynamicsType::CreutzKawasaki,
                         "Creutz-Kawasaki",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_dynamics_type,
+                        DynamicsType::CreutzThermal,
+                        "Creutz-Thermal",
                     );
                 });
 
@@ -288,6 +311,27 @@ impl eframe::App for IsingApp {
                             .text("Demon energy"),
                     );
                 }
+                DynamicsType::CreutzThermal => {
+                    ui.add(egui::Slider::new(&mut self.ui_thermal_beta, 0.01..=5.0).text("β"));
+                    ui.add(egui::Slider::new(&mut self.ui_thermal_m, 0.0..=1.0).text("m"));
+                    egui::ComboBox::from_label("Demon replacement")
+                        .selected_text(match self.ui_demon_replacement {
+                            DemonReplacementMode::PerStep => "Per-Step",
+                            DemonReplacementMode::PerSweep => "Per-Sweep",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.ui_demon_replacement,
+                                DemonReplacementMode::PerStep,
+                                "Per-Step",
+                            );
+                            ui.selectable_value(
+                                &mut self.ui_demon_replacement,
+                                DemonReplacementMode::PerSweep,
+                                "Per-Sweep",
+                            );
+                        });
+                }
             }
 
             ui.add(egui::Slider::new(&mut self.ui_l, 10..=500).text("Lattice size L"));
@@ -341,6 +385,18 @@ impl eframe::App for IsingApp {
                         0.0
                     };
                     ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
+                }
+                Dynamics::CreutzThermal(ct) => {
+                    let sum_h: i32 = ct.demons_h.iter().sum();
+                    let sum_v: i32 = ct.demons_v.iter().sum();
+                    let total_demons = ct.demons_h.len() + ct.demons_v.len();
+                    let avg_demon_energy = if total_demons > 0 {
+                        (sum_h + sum_v) as f64 / total_demons as f64
+                    } else {
+                        0.0
+                    };
+                    ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
+                    ui.label(format!("β = {:.3}, m = {:.6}", ct.beta, ct.m));
                 }
                 Dynamics::Kawasaki(kd) => {
                     ui.label(format!("β = {:.3}", kd.beta));
@@ -469,6 +525,7 @@ impl eframe::App for IsingApp {
                 let current_h_data: Option<&Vec<i32>> = match &self.dynamics {
                     Dynamics::CreutzKawasaki(c) => Some(&c.current_h),
                     Dynamics::Kawasaki(c) => Some(&c.current_h),
+                    Dynamics::CreutzThermal(c) => Some(&c.current_h),
                     _ => None,
                 };
 
