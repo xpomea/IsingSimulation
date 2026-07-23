@@ -30,6 +30,8 @@ struct IsingApp {
     history_energy: Vec<[f64; 2]>,
     history_susceptibility: Vec<[f64; 2]>,
 
+    history_spin_sum: Vec<i64>,
+
     last_sweep_time_ms: f64,
     last_draw_time_ms: f64,
 
@@ -66,6 +68,8 @@ impl Default for IsingApp {
             history_energy: Vec::new(),
             history_susceptibility: Vec::new(),
 
+            history_spin_sum: vec![0; l],
+
             last_sweep_time_ms: 0.0,
             last_draw_time_ms: 0.0,
 
@@ -83,6 +87,10 @@ impl Default for IsingApp {
 }
 
 impl IsingApp {
+    fn reset_col_mag_history(&mut self) {
+        self.history_spin_sum = vec![0; self.model.l];
+    }
+
     fn restart(&mut self) {
         self.model = IsingModel::new(
             self.ui_l,
@@ -110,6 +118,7 @@ impl IsingApp {
         self.history_mag.clear();
         self.history_energy.clear();
         self.history_susceptibility.clear();
+        self.reset_col_mag_history();
         self.texture = None;
         self.is_running = false;
     }
@@ -121,6 +130,17 @@ impl eframe::App for IsingApp {
             let start = Instant::now();
             for _ in 0..self.steps_per_frame {
                 self.dynamics.sweep(&mut self.model);
+
+                if self.history_spin_sum.len() != self.model.l {
+                    self.history_spin_sum = vec![0; self.model.l];
+                }
+                for x in 0..self.model.l {
+                    let mut sum: i64 = 0;
+                    for y in 0..self.model.l {
+                        sum += self.model.lattice[y * self.model.l + x] as i64;
+                    }
+                    self.history_spin_sum[x] += sum;
+                }
             }
             self.time_step += self.steps_per_frame as f64;
             self.last_sweep_time_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -284,6 +304,7 @@ impl eframe::App for IsingApp {
                     InitialCondition::Random,
                     BoundaryCondition::Shifted,
                 );
+                self.reset_col_mag_history();
             }
             if ui.button("All +1").clicked() {
                 self.model = IsingModel::new(
@@ -291,6 +312,7 @@ impl eframe::App for IsingApp {
                     InitialCondition::AllUp,
                     BoundaryCondition::Shifted,
                 );
+                self.reset_col_mag_history();
             }
             if ui.button("All -1").clicked() {
                 self.model = IsingModel::new(
@@ -298,6 +320,7 @@ impl eframe::App for IsingApp {
                     InitialCondition::AllDown,
                     BoundaryCondition::Shifted,
                 );
+                self.reset_col_mag_history();
             }
 
             ui.separator();
@@ -345,53 +368,107 @@ impl eframe::App for IsingApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
-                let available_size = ui.available_size();
-                let plot_height = 60.0;
+                let lattice_side = 200.0_f32;
+                let plot_width = ui.available_width();
+                let plot_height = 80.0;
                 let spacing = 10.0;
-                let side = available_size
-                    .x
-                    .min(available_size.y - 4.0 * plot_height - 5.0 * spacing)
-                    .max(1.0);
 
                 let start = Instant::now();
-                self.draw_lattice(ui, ctx, side);
+                self.draw_lattice(ui, ctx, lattice_side);
                 self.last_draw_time_ms = start.elapsed().as_secs_f64() * 1000.0;
 
                 ui.add_space(spacing);
 
-                let mut col_mag = vec![0.0; self.model.l];
-                for x in 0..self.model.l {
-                    let mut sum = 0;
-                    for y in 0..self.model.l {
-                        sum += self.model.lattice[y * self.model.l + x];
+                let col_mag: Vec<f64> = if self.time_step > 0.0
+                    && self.history_spin_sum.len() == self.model.l
+                {
+                    let total_denom = (self.model.l as f64) * self.time_step;
+                    self.history_spin_sum
+                        .iter()
+                        .map(|&s| s as f64 / total_denom)
+                        .collect()
+                } else {
+                    let mut inst = vec![0.0; self.model.l];
+                    for x in 0..self.model.l {
+                        let mut sum = 0;
+                        for y in 0..self.model.l {
+                            sum += self.model.lattice[y * self.model.l + x];
+                        }
+                        inst[x] = sum as f64 / self.model.l as f64;
                     }
-                    col_mag[x] = sum as f64 / self.model.l as f64;
-                }
-                let points: Vec<[f64; 2]> = col_mag
-                    .into_iter()
+                    inst
+                };
+
+                // 1. Full magnetization profile
+                let full_points: Vec<[f64; 2]> = col_mag
+                    .iter()
                     .enumerate()
-                    .map(|(x, m)| [x as f64, m])
+                    .map(|(x, &m)| [x as f64, m])
                     .collect();
-                let line =
-                    Line::new(PlotPoints::new(points)).color(egui::Color32::from_rgb(250, 150, 50));
+                let line_full = Line::new(PlotPoints::new(full_points))
+                    .color(egui::Color32::from_rgb(250, 150, 50));
 
                 Plot::new("vertical_mag_plot")
                     .height(plot_height)
-                    .width(side)
+                    .width(plot_width)
                     .include_y(-1.1)
                     .include_y(1.1)
-                    .show(ui, |plot_ui| plot_ui.line(line));
+                    .show(ui, |plot_ui| plot_ui.line(line_full));
 
                 ui.add_space(spacing);
 
+                // 2 & 3. Zoomed magnetization profiles (left and right) side-by-side
+                let half_l = self.model.l / 2;
+                ui.columns(2, |columns| {
+                    columns[0].vertical(|ui| {
+                        let left_points: Vec<[f64; 2]> = col_mag[..half_l]
+                            .iter()
+                            .enumerate()
+                            .map(|(x, &m)| [x as f64, m])
+                            .collect();
+                        let line_left = Line::new(PlotPoints::new(left_points))
+                            .color(egui::Color32::from_rgb(250, 150, 50));
+
+                        Plot::new("left_zoom_mag_plot")
+                            .height(plot_height)
+                            .auto_bounds(egui::Vec2b::new(false, false))
+                            .show(ui, |plot_ui| {
+                                plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
+                                    [0.0, -1.0],
+                                    [half_l as f64, -0.998],
+                                ));
+                                plot_ui.line(line_left);
+                            });
+                    });
+
+                    columns[1].vertical(|ui| {
+                        let right_points: Vec<[f64; 2]> = col_mag[half_l..]
+                            .iter()
+                            .enumerate()
+                            .map(|(x, &m)| [(half_l + x) as f64, m])
+                            .collect();
+                        let line_right = Line::new(PlotPoints::new(right_points))
+                            .color(egui::Color32::from_rgb(250, 150, 50));
+
+                        Plot::new("right_zoom_mag_plot")
+                            .height(plot_height)
+                            .auto_bounds(egui::Vec2b::new(false, false))
+                            .show(ui, |plot_ui| {
+                                plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
+                                    [half_l as f64, 0.998],
+                                    [self.model.l as f64, 1.0],
+                                ));
+                                plot_ui.line(line_right);
+                            });
+                    });
+                });
+
+                ui.add_space(spacing);
+
+                // 4. Spin current plot
                 let current_h_data: Option<&Vec<i32>> = match &self.dynamics {
                     Dynamics::CreutzKawasaki(c) => Some(&c.current_h),
                     Dynamics::Kawasaki(c) => Some(&c.current_h),
-                    _ => None,
-                };
-
-                let creutz_data: Option<(&Vec<i32>, &Vec<i32>, &Vec<i32>)> = match &self.dynamics {
-                    Dynamics::CreutzKawasaki(c) => Some((&c.demons_h, &c.demons_v, &c.current_h)),
                     _ => None,
                 };
 
@@ -406,57 +483,8 @@ impl eframe::App for IsingApp {
 
                     Plot::new("spin_current_plot")
                         .height(plot_height)
-                        .width(side)
+                        .width(plot_width)
                         .show(ui, |plot_ui| plot_ui.line(line_current));
-
-                    ui.add_space(spacing);
-                }
-
-                if let Some((demons_h, demons_v, _current_h)) = creutz_data {
-                    let mut col_demon_v = vec![0.0; self.model.l];
-                    let mut col_demon_h = vec![0.0; self.model.l];
-                    for x in 0..self.model.l {
-                        let mut sum_v = 0;
-                        let mut sum_h = 0;
-                        for y in 0..self.model.l {
-                            let idx = y * self.model.l + x;
-                            sum_v += demons_v[idx];
-                            if x < self.model.l - 1 {
-                                sum_h += demons_h[idx];
-                            }
-                        }
-                        col_demon_v[x] = sum_v as f64 / self.model.l as f64;
-                        col_demon_h[x] = sum_h as f64 / self.model.l as f64;
-                    }
-                    let demon_v_points: Vec<[f64; 2]> = col_demon_v
-                        .into_iter()
-                        .enumerate()
-                        .map(|(x, e)| [x as f64, e])
-                        .collect();
-                    let line_demon_v = Line::new(PlotPoints::new(demon_v_points))
-                        .color(egui::Color32::from_rgb(200, 50, 200));
-
-                    Plot::new("demon_energy_v_plot")
-                        .height(plot_height)
-                        .width(side)
-                        .include_y(0.0)
-                        .show(ui, |plot_ui| plot_ui.line(line_demon_v));
-
-                    ui.add_space(spacing);
-
-                    let demon_h_points: Vec<[f64; 2]> = col_demon_h
-                        .into_iter()
-                        .enumerate()
-                        .map(|(x, e)| [x as f64, e])
-                        .collect();
-                    let line_demon_h = Line::new(PlotPoints::new(demon_h_points))
-                        .color(egui::Color32::from_rgb(200, 100, 250));
-
-                    Plot::new("demon_energy_h_plot")
-                        .height(plot_height)
-                        .width(side)
-                        .include_y(0.0)
-                        .show(ui, |plot_ui| plot_ui.line(line_demon_h));
                 }
             });
         });
