@@ -7,7 +7,16 @@ mod ising_model;
 use dynamics::Dynamics;
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
-use crate::dynamics::{BondSelection, KawasakiDynamics, ReservoirType};
+use crate::dynamics::{
+    BondSelection, CreutzKawasakiDynamics, KawasakiDynamics, MetropolisDynamics, ReservoirType,
+};
+
+#[derive(Clone, Copy, PartialEq)]
+enum DynamicsType {
+    Metropolis,
+    Kawasaki,
+    CreutzKawasaki,
+}
 
 struct IsingApp {
     model: IsingModel,
@@ -23,15 +32,30 @@ struct IsingApp {
 
     last_sweep_time_ms: f64,
     last_draw_time_ms: f64,
+
+    selected_dynamics_type: DynamicsType,
+    ui_l: usize,
+    ui_bond_selection: BondSelection,
+    ui_reservoir_type: ReservoirType,
+
+    ui_temp: f64,
+    ui_kawasaki_beta: f64,
+    ui_kawasaki_m_plus: f64,
+    ui_creutz_m: f64,
+    ui_creutz_starting_energy: i32,
 }
 
 impl Default for IsingApp {
     fn default() -> Self {
         let l = 40;
-        return Self {
+        Self {
             model: IsingModel::new(l, InitialCondition::Random, BoundaryCondition::Shifted),
             dynamics: Dynamics::Kawasaki(KawasakiDynamics::new(
-                l, 1.0, 0.9995, BondSelection::Random, ReservoirType::Annealed,
+                l,
+                1.0,
+                0.9995,
+                BondSelection::Random,
+                ReservoirType::Annealed,
             )),
             steps_per_frame: 10,
             is_running: false,
@@ -44,7 +68,50 @@ impl Default for IsingApp {
 
             last_sweep_time_ms: 0.0,
             last_draw_time_ms: 0.0,
+
+            selected_dynamics_type: DynamicsType::Kawasaki,
+            ui_l: l,
+            ui_bond_selection: BondSelection::Random,
+            ui_reservoir_type: ReservoirType::Annealed,
+            ui_temp: 2.27,
+            ui_kawasaki_beta: 1.0,
+            ui_kawasaki_m_plus: 0.9995,
+            ui_creutz_m: 0.997,
+            ui_creutz_starting_energy: 80,
+        }
+    }
+}
+
+impl IsingApp {
+    fn restart(&mut self) {
+        self.model = IsingModel::new(
+            self.ui_l,
+            InitialCondition::Random,
+            BoundaryCondition::Shifted,
+        );
+        self.dynamics = match self.selected_dynamics_type {
+            DynamicsType::Metropolis => Dynamics::Metropolis(MetropolisDynamics::new(self.ui_temp)),
+            DynamicsType::Kawasaki => Dynamics::Kawasaki(KawasakiDynamics::new(
+                self.ui_l,
+                self.ui_kawasaki_beta,
+                self.ui_kawasaki_m_plus,
+                self.ui_bond_selection,
+                self.ui_reservoir_type,
+            )),
+            DynamicsType::CreutzKawasaki => Dynamics::CreutzKawasaki(CreutzKawasakiDynamics::new(
+                self.ui_l,
+                self.ui_creutz_m,
+                self.ui_creutz_starting_energy,
+                self.ui_bond_selection,
+                self.ui_reservoir_type,
+            )),
         };
+        self.time_step = 0.0;
+        self.history_mag.clear();
+        self.history_energy.clear();
+        self.history_susceptibility.clear();
+        self.texture = None;
+        self.is_running = false;
     }
 }
 
@@ -114,27 +181,99 @@ impl eframe::App for IsingApp {
                 egui::Slider::new(&mut self.steps_per_frame, 1..=1000).text("Speed (sweeps/frame)"),
             );
 
-            match &mut self.dynamics {
-                Dynamics::Metropolis(metro) => {
-                    let mut temp = metro.temp;
+            ui.separator();
+            ui.heading("Dynamics Setup");
+
+            egui::ComboBox::from_label("Dynamics")
+                .selected_text(match self.selected_dynamics_type {
+                    DynamicsType::Metropolis => "Metropolis",
+                    DynamicsType::Kawasaki => "Kawasaki",
+                    DynamicsType::CreutzKawasaki => "Creutz-Kawasaki",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.selected_dynamics_type,
+                        DynamicsType::Metropolis,
+                        "Metropolis",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_dynamics_type,
+                        DynamicsType::Kawasaki,
+                        "Kawasaki",
+                    );
+                    ui.selectable_value(
+                        &mut self.selected_dynamics_type,
+                        DynamicsType::CreutzKawasaki,
+                        "Creutz-Kawasaki",
+                    );
+                });
+
+            if self.selected_dynamics_type != DynamicsType::Metropolis {
+                egui::ComboBox::from_label("Bond selection")
+                    .selected_text(match self.ui_bond_selection {
+                        BondSelection::Random => "Random",
+                        BondSelection::Checkerboard => "Checkerboard",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.ui_bond_selection,
+                            BondSelection::Random,
+                            "Random",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_bond_selection,
+                            BondSelection::Checkerboard,
+                            "Checkerboard",
+                        );
+                    });
+
+                egui::ComboBox::from_label("Reservoir type")
+                    .selected_text(match self.ui_reservoir_type {
+                        ReservoirType::Annealed => "Annealed",
+                        ReservoirType::Quenched => "Quenched",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.ui_reservoir_type,
+                            ReservoirType::Annealed,
+                            "Annealed",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_reservoir_type,
+                            ReservoirType::Quenched,
+                            "Quenched",
+                        );
+                    });
+            }
+
+            match self.selected_dynamics_type {
+                DynamicsType::Metropolis => {
                     if ui
-                        .add(egui::Slider::new(&mut temp, 0.1..=5.0).text("Temperature T"))
+                        .add(egui::Slider::new(&mut self.ui_temp, 0.1..=5.0).text("Temperature T"))
                         .changed()
                     {
-                        metro.set_temperature(temp);
+                        if let Dynamics::Metropolis(metro) = &mut self.dynamics {
+                            metro.set_temperature(self.ui_temp);
+                        }
                     }
                 }
-                Dynamics::CreutzKawasaki(creutz) => {
-                    let sum_h: i32 = creutz.demons_h.iter().sum();
-                    let sum_v: i32 = creutz.demons_v.iter().sum();
-                    let total_demons = creutz.demons_h.len() + creutz.demons_v.len();
-                    let avg_demon_energy = (sum_h + sum_v) as f64 / total_demons as f64;
-                    ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
+                DynamicsType::Kawasaki => {
+                    ui.add(egui::Slider::new(&mut self.ui_kawasaki_beta, 0.01..=5.0).text("β"));
+                    ui.add(egui::Slider::new(&mut self.ui_kawasaki_m_plus, 0.0..=1.0).text("m+"));
                 }
-                Dynamics::Kawasaki(kd) => {
-                    ui.label(format!("β = {:.3}", kd.beta));
-                    ui.label(format!("m+ = {:.6}", kd.m_plus));
+                DynamicsType::CreutzKawasaki => {
+                    ui.add(egui::Slider::new(&mut self.ui_creutz_m, 0.0..=1.0).text("m"));
+                    ui.add(
+                        egui::Slider::new(&mut self.ui_creutz_starting_energy, 0..=200)
+                            .text("Demon energy"),
+                    );
                 }
+            }
+
+            ui.add(egui::Slider::new(&mut self.ui_l, 10..=500).text("Lattice size L"));
+
+            if ui.button("🔄 Restart Simulation").clicked() {
+                self.restart();
             }
 
             ui.separator();
@@ -167,6 +306,27 @@ impl eframe::App for IsingApp {
                 "Energy: {:.3}",
                 self.model.energy as f64 / (self.model.l * self.model.l) as f64
             ));
+
+            match &self.dynamics {
+                Dynamics::CreutzKawasaki(creutz) => {
+                    let sum_h: i32 = creutz.demons_h.iter().sum();
+                    let sum_v: i32 = creutz.demons_v.iter().sum();
+                    let total_demons = creutz.demons_h.len() + creutz.demons_v.len();
+                    let avg_demon_energy = if total_demons > 0 {
+                        (sum_h + sum_v) as f64 / total_demons as f64
+                    } else {
+                        0.0
+                    };
+                    ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
+                }
+                Dynamics::Kawasaki(kd) => {
+                    ui.label(format!("β = {:.3}", kd.beta));
+                    ui.label(format!("m+ = {:.6}", kd.m_plus));
+                }
+                Dynamics::Metropolis(m) => {
+                    ui.label(format!("T = {:.3}", m.temp));
+                }
+            }
 
             ui.separator();
             ui.heading("Профилирование");
