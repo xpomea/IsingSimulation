@@ -2,8 +2,10 @@ use eframe::egui;
 use egui_plot::{Line, Plot, PlotPoints};
 use std::time::Instant;
 
+mod demon_histogram;
 mod dynamics;
 mod ising_model;
+use demon_histogram::PerBondDemonHistogram;
 use dynamics::Dynamics;
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
@@ -34,6 +36,8 @@ struct IsingApp {
 
     history_spin_sum: Vec<i64>,
 
+    demon_histogram: Option<PerBondDemonHistogram>,
+
     last_sweep_time_ms: f64,
     last_draw_time_ms: f64,
 
@@ -61,7 +65,7 @@ impl Default for IsingApp {
             dynamics: Dynamics::Kawasaki(KawasakiDynamics::new(
                 l,
                 1.0,
-                0.9995,
+                0.999,
                 BondSelection::Random,
                 ReservoirType::Annealed,
             )),
@@ -76,6 +80,8 @@ impl Default for IsingApp {
 
             history_spin_sum: vec![0; l],
 
+            demon_histogram: None,
+
             last_sweep_time_ms: 0.0,
             last_draw_time_ms: 0.0,
 
@@ -86,11 +92,13 @@ impl Default for IsingApp {
             ui_reservoir_type: ReservoirType::Annealed,
             ui_temp: 2.27,
             ui_kawasaki_beta: 1.0,
-            ui_kawasaki_m_plus: 0.9995,
-            ui_creutz_m: 0.997,
+            ui_kawasaki_m_plus: 0.999,
+            ui_creutz_m: 0.999,
             ui_creutz_starting_energy: 80,
+            ui_creutz_initial_demon: 1,
+            ui_creutz_max_demon: 3,
             ui_thermal_beta: 1.0,
-            ui_thermal_m: 0.997,
+            ui_thermal_m: 0.999,
             ui_demon_replacement: DemonReplacementMode::PerStep,
         }
     }
@@ -100,6 +108,7 @@ impl IsingApp {
     fn reset_col_mag_history(&mut self) {
         self.history_spin_sum = vec![0; self.model.l];
         self.time_step = 0.0;
+        self.demon_histogram = None;
     }
 
     fn restart(&mut self) {
@@ -138,6 +147,7 @@ impl IsingApp {
         self.history_energy.clear();
         self.history_susceptibility.clear();
         self.reset_col_mag_history();
+        self.demon_histogram = None;
         self.texture = None;
         self.is_running = false;
     }
@@ -159,6 +169,24 @@ impl eframe::App for IsingApp {
                         sum += self.model.lattice[y * self.model.l + x] as i64;
                     }
                     self.history_spin_sum[x] += sum;
+                }
+
+                match &self.dynamics {
+                    Dynamics::CreutzKawasaki(c) => {
+                        let l = self.model.l;
+                        let hist = self
+                            .demon_histogram
+                            .get_or_insert_with(|| PerBondDemonHistogram::new(2 * l * l, 16));
+                        hist.record_all(&c.demons_h, &c.demons_v, l);
+                    }
+                    Dynamics::CreutzThermal(c) => {
+                        let l = self.model.l;
+                        let hist = self.demon_histogram.get_or_insert_with(|| {
+                            PerBondDemonHistogram::new(2 * l * l, 32)
+                        });
+                        hist.record_all(&c.demons_h, &c.demons_v, l);
+                    }
+                    _ => {}
                 }
             }
             self.time_step += self.steps_per_frame as f64;
@@ -445,7 +473,7 @@ impl eframe::App for IsingApp {
             ui.vertical(|ui| {
                 let lattice_side = 200.0_f32;
                 let plot_width = ui.available_width();
-                let plot_height = 80.0;
+                let plot_height = 150.0;
                 let spacing = 10.0;
 
                 let start = Instant::now();
@@ -454,25 +482,24 @@ impl eframe::App for IsingApp {
 
                 ui.add_space(spacing);
 
-                let col_mag: Vec<f64> = if self.time_step > 0.0
-                    && self.history_spin_sum.len() == self.model.l
-                {
-                    let total_denom = (self.model.l as f64) * self.time_step;
-                    self.history_spin_sum
-                        .iter()
-                        .map(|&s| s as f64 / total_denom)
-                        .collect()
-                } else {
-                    let mut inst = vec![0.0; self.model.l];
-                    for x in 0..self.model.l {
-                        let mut sum = 0;
-                        for y in 0..self.model.l {
-                            sum += self.model.lattice[y * self.model.l + x];
+                let col_mag: Vec<f64> =
+                    if self.time_step > 0.0 && self.history_spin_sum.len() == self.model.l {
+                        let total_denom = (self.model.l as f64) * self.time_step;
+                        self.history_spin_sum
+                            .iter()
+                            .map(|&s| s as f64 / total_denom)
+                            .collect()
+                    } else {
+                        let mut inst = vec![0.0; self.model.l];
+                        for x in 0..self.model.l {
+                            let mut sum = 0;
+                            for y in 0..self.model.l {
+                                sum += self.model.lattice[y * self.model.l + x];
+                            }
+                            inst[x] = sum as f64 / self.model.l as f64;
                         }
-                        inst[x] = sum as f64 / self.model.l as f64;
-                    }
-                    inst
-                };
+                        inst
+                    };
 
                 // 1. Full magnetization profile
                 let full_points: Vec<[f64; 2]> = col_mag
@@ -561,6 +588,46 @@ impl eframe::App for IsingApp {
                         .height(plot_height)
                         .width(plot_width)
                         .show(ui, |plot_ui| plot_ui.line(line_current));
+                }
+
+                // 5. Effective beta plot (demon-based dynamics only)
+                if let Some(hist) = &self.demon_histogram {
+                    if !hist.is_empty() {
+                        let agg = hist.aggregate_betas();
+                        if !agg.mean.is_empty() {
+                            ui.add_space(spacing);
+
+                            let line_mean = Line::new(PlotPoints::new(agg.mean))
+                                .color(egui::Color32::from_rgb(100, 255, 100))
+                                .width(2.0);
+                            let line_std_upper = Line::new(PlotPoints::new(agg.std_upper))
+                                .color(egui::Color32::from_rgb(70, 180, 70))
+                                .width(1.0);
+                            let line_std_lower = Line::new(PlotPoints::new(agg.std_lower))
+                                .color(egui::Color32::from_rgb(70, 180, 70))
+                                .width(1.0);
+                            let line_min = Line::new(PlotPoints::new(agg.min))
+                                .color(egui::Color32::from_rgb(180, 70, 70))
+                                .width(1.0);
+                            let line_max = Line::new(PlotPoints::new(agg.max))
+                                .color(egui::Color32::from_rgb(180, 70, 70))
+                                .width(1.0);
+
+                            Plot::new("effective_beta_plot")
+                                .height(plot_height)
+                                .width(plot_width)
+                                .x_axis_label("Level i (E = 4i)")
+                                .y_axis_label("β_eff")
+                                .include_y(0.0)
+                                .show(ui, |plot_ui| {
+                                    plot_ui.line(line_min);
+                                    plot_ui.line(line_std_lower);
+                                    plot_ui.line(line_mean);
+                                    plot_ui.line(line_std_upper);
+                                    plot_ui.line(line_max);
+                                });
+                        }
+                    }
                 }
             });
         });
