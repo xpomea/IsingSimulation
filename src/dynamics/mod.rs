@@ -5,11 +5,13 @@ pub mod metropolis;
 pub mod kawasaki;
 pub mod creutz_kawasaki;
 pub mod creutz_thermal;
+pub mod creutz;
 
 pub use metropolis::MetropolisDynamics;
 pub use kawasaki::KawasakiDynamics;
 pub use creutz_kawasaki::CreutzKawasakiDynamics;
 pub use creutz_thermal::CreutzThermalDynamics;
+pub use creutz::CreutzDynamics;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum BondSelection {
@@ -34,6 +36,7 @@ pub enum Dynamics {
     Kawasaki(KawasakiDynamics),
     CreutzKawasaki(CreutzKawasakiDynamics),
     CreutzThermal(CreutzThermalDynamics),
+    Creutz(CreutzDynamics),
 }
 
 impl Dynamics {
@@ -43,6 +46,7 @@ impl Dynamics {
             Dynamics::Kawasaki(d) => d.sweep(model),
             Dynamics::CreutzKawasaki(d) => d.sweep(model),
             Dynamics::CreutzThermal(d) => d.sweep(model),
+            Dynamics::Creutz(d) => d.sweep(model),
         }
     }
 }

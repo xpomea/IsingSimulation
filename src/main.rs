@@ -10,8 +10,8 @@ use dynamics::Dynamics;
 use ising_model::{BoundaryCondition, InitialCondition, IsingModel};
 
 use crate::dynamics::{
-    BondSelection, CreutzKawasakiDynamics, CreutzThermalDynamics, DemonReplacementMode,
-    KawasakiDynamics, MetropolisDynamics, ReservoirType,
+    BondSelection, CreutzDynamics, CreutzKawasakiDynamics, CreutzThermalDynamics,
+    DemonReplacementMode, KawasakiDynamics, MetropolisDynamics, ReservoirType,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -20,6 +20,7 @@ enum DynamicsType {
     Kawasaki,
     CreutzKawasaki,
     CreutzThermal,
+    Creutz,
 }
 
 struct IsingApp {
@@ -52,6 +53,8 @@ struct IsingApp {
     ui_kawasaki_m_plus: f64,
     ui_creutz_m: f64,
     ui_creutz_starting_energy: i32,
+    ui_creutz_initial_demon: i32,
+    ui_creutz_max_demon: i32,
     ui_thermal_beta: f64,
     ui_thermal_m: f64,
     ui_demon_replacement: DemonReplacementMode,
@@ -141,6 +144,11 @@ impl IsingApp {
                 self.ui_bond_selection,
                 self.ui_reservoir_type,
             )),
+            DynamicsType::Creutz => Dynamics::Creutz(CreutzDynamics::new(
+                self.ui_l,
+                self.ui_creutz_initial_demon,
+                self.ui_creutz_max_demon,
+            )),
         };
         self.time_step = 0.0;
         self.history_mag.clear();
@@ -185,6 +193,13 @@ impl eframe::App for IsingApp {
                             PerBondDemonHistogram::new(2 * l * l, 32)
                         });
                         hist.record_all(&c.demons_h, &c.demons_v, l);
+                    }
+                    Dynamics::Creutz(c) => {
+                        let n_sites = self.model.l * self.model.l;
+                        let hist = self.demon_histogram.get_or_insert_with(|| {
+                            PerBondDemonHistogram::new(n_sites, 32)
+                        });
+                        hist.record_creutz(&c.demons);
                     }
                     _ => {}
                 }
@@ -258,6 +273,7 @@ impl eframe::App for IsingApp {
                     DynamicsType::Kawasaki => "Kawasaki",
                     DynamicsType::CreutzKawasaki => "Creutz-Kawasaki",
                     DynamicsType::CreutzThermal => "Creutz-Thermal",
+                    DynamicsType::Creutz => "Creutz (original)",
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
@@ -280,9 +296,16 @@ impl eframe::App for IsingApp {
                         DynamicsType::CreutzThermal,
                         "Creutz-Thermal",
                     );
+                    ui.selectable_value(
+                        &mut self.selected_dynamics_type,
+                        DynamicsType::Creutz,
+                        "Creutz (original)",
+                    );
                 });
 
-            if self.selected_dynamics_type != DynamicsType::Metropolis {
+            if self.selected_dynamics_type != DynamicsType::Metropolis
+                && self.selected_dynamics_type != DynamicsType::Creutz
+            {
                 egui::ComboBox::from_label("Bond selection")
                     .selected_text(match self.ui_bond_selection {
                         BondSelection::Random => "Random",
@@ -362,6 +385,16 @@ impl eframe::App for IsingApp {
                                 "Per-Sweep",
                             );
                         });
+                }
+                DynamicsType::Creutz => {
+                    ui.add(
+                        egui::Slider::new(&mut self.ui_creutz_initial_demon, 0..=15)
+                            .text("Initial demon energy"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.ui_creutz_max_demon, 1..=15)
+                            .text("Max demon value"),
+                    );
                 }
             }
 
@@ -444,6 +477,16 @@ impl eframe::App for IsingApp {
                     };
                     ui.label(format!("Avg Demon Energy: {:.3}", avg_demon_energy));
                     ui.label(format!("β = {:.3}, m = {:.6}", ct.beta, ct.m));
+                }
+                Dynamics::Creutz(c) => {
+                    let sum: i32 = c.demons.iter().sum();
+                    let avg = sum as f64 / c.demons.len() as f64;
+                    ui.label(format!("Avg Demon Energy: {:.3}", avg));
+                    let p_approx = avg / (1.0 + avg);
+                    if p_approx > 0.0 && p_approx < 1.0 {
+                        let beta_est = -p_approx.ln() / 4.0;
+                        ui.label(format!("β (estimated): {:.4}", beta_est));
+                    }
                 }
                 Dynamics::Kawasaki(kd) => {
                     ui.label(format!("β = {:.3}", kd.beta));
