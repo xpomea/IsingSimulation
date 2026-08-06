@@ -14,7 +14,7 @@ impl PerBondDemonHistogram {
     }
 
     pub fn record(&mut self, bond_idx: usize, demon_energy: i32) {
-        let k = (demon_energy / 4) as usize;
+        let k = demon_energy as usize;
         if bond_idx < self.n_bonds && k < self.max_levels {
             self.counts[bond_idx * self.max_levels + k] += 1;
         }

@@ -45,7 +45,7 @@ impl CreutzThermalDynamics {
         let mut rng: SmallRng = rand::make_rng();
         let current_h = vec![0; l.saturating_sub(1)];
 
-        let demon_pool = Self::build_demon_pool(100_000, beta, &mut rng);
+        let demon_pool = Self::build_demon_pool(1_000_000, beta, &mut rng);
 
         let demons_h: Vec<i32> = (0..l * l)
             .map(|i| demon_pool[i % demon_pool.len()])
@@ -96,19 +96,29 @@ impl CreutzThermalDynamics {
     }
 
     fn build_demon_pool(size: usize, beta: f64, rng: &mut SmallRng) -> Vec<i32> {
-        let p = (-4.0 * beta).exp();
         let mut pool = Vec::with_capacity(size);
-        for _ in 0..size {
-            let u: f64 = rng.random_range(0.0_f64..1.0_f64);
-            let k = if p > 0.0 && p < 1.0 {
-                (u.ln() / p.ln()).floor() as i32
-            } else if p >= 1.0 {
-                rng.random_range(0..100)
-            } else {
-                0
-            };
-            pool.push(4 * k.max(0));
+        let z = 1.0 - (-beta).exp();
+
+        for i in 0..2_000_000 {
+            let weight = (-beta * i as f64).exp();
+            let fraction = weight / z;
+            let count = (size as f64 * fraction).round() as usize;
+
+            if count == 0 {
+                break;
+            }
+            
+            let energy = i as i32;
+            println!("{energy}");
+            for _ in 0..count {
+                pool.push(energy);
+            }
         }
+
+        if pool.is_empty() {
+            pool.resize(size, 0);
+        }
+
         pool.shuffle(rng);
         pool
     }
