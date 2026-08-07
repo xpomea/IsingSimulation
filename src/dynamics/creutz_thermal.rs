@@ -109,7 +109,6 @@ impl CreutzThermalDynamics {
             }
             
             let energy = i as i32;
-            println!("{energy}");
             for _ in 0..count {
                 pool.push(energy);
             }
