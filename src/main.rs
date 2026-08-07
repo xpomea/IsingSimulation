@@ -31,9 +31,6 @@ struct IsingApp {
     texture: Option<egui::TextureHandle>,
 
     time_step: f64,
-    history_mag: Vec<[f64; 2]>,
-    history_energy: Vec<[f64; 2]>,
-    history_susceptibility: Vec<[f64; 2]>,
 
     history_spin_sum: Vec<i64>,
 
@@ -77,10 +74,6 @@ impl Default for IsingApp {
             texture: None,
 
             time_step: 0.0,
-            history_mag: Vec::new(),
-            history_energy: Vec::new(),
-            history_susceptibility: Vec::new(),
-
             history_spin_sum: vec![0; l],
 
             demon_histogram: None,
@@ -112,6 +105,12 @@ impl IsingApp {
         self.history_spin_sum = vec![0; self.model.l];
         self.time_step = 0.0;
         self.demon_histogram = None;
+        match &mut self.dynamics {
+            Dynamics::Kawasaki(d) => d.current_h.fill(0),
+            Dynamics::CreutzKawasaki(d) => d.current_h.fill(0),
+            Dynamics::CreutzThermal(d) => d.current_h.fill(0),
+            _ => {}
+        }
     }
 
     fn restart(&mut self) {
@@ -151,9 +150,6 @@ impl IsingApp {
             )),
         };
         self.time_step = 0.0;
-        self.history_mag.clear();
-        self.history_energy.clear();
-        self.history_susceptibility.clear();
         self.reset_col_mag_history();
         self.demon_histogram = None;
         self.texture = None;
@@ -206,46 +202,7 @@ impl eframe::App for IsingApp {
             }
             self.time_step += self.steps_per_frame as f64;
             self.last_sweep_time_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-            let current_mag = self.model.magnetization();
-            let current_energy = self.model.energy as f64 / (self.model.l * self.model.l) as f64;
-
-            self.history_mag.push([self.time_step, current_mag]);
-            self.history_energy.push([self.time_step, current_energy]);
-
-            let window = 300;
-            let mut sum_mag = 0.0;
-            let mut sum_mag_squared = 0.0;
-
-            let start_idx = self.history_mag.len().saturating_sub(window);
-            for i in start_idx..self.history_mag.len() {
-                sum_mag += self.history_mag[i][1];
-                sum_mag_squared += self.history_mag[i][1].powf(2.0);
-            }
-
-            let window_len = (self.history_mag.len() - start_idx).max(1) as f64;
-            let n = self.model.l * self.model.l;
-
-            let beta = match &self.dynamics {
-                Dynamics::Metropolis(d) => d.beta,
-                Dynamics::Kawasaki(d) => d.beta,
-                Dynamics::CreutzThermal(d) => d.beta,
-                _ => 1.0,
-            };
-
-            let current_susceptibility = beta
-                * (n as f64)
-                * (sum_mag_squared / window_len - (sum_mag / window_len).powf(2.0));
-
-            self.history_susceptibility
-                .push([self.time_step, current_susceptibility]);
-
-            if self.history_mag.len() > 1000 {
-                self.history_mag.remove(0);
-                self.history_energy.remove(0);
-                self.history_susceptibility.remove(0);
-            }
-
+            
             ctx.request_repaint();
         }
 
@@ -454,6 +411,23 @@ impl eframe::App for IsingApp {
                 self.model.energy as f64 / (self.model.l * self.model.l) as f64
             ));
 
+            let current_h_data: Option<&Vec<i32>> = match &self.dynamics {
+                Dynamics::CreutzKawasaki(c) => Some(&c.current_h),
+                Dynamics::Kawasaki(c) => Some(&c.current_h),
+                Dynamics::CreutzThermal(c) => Some(&c.current_h),
+                _ => None,
+            };
+
+            if let Some(current_h) = current_h_data {
+                let sum_current: i64 = current_h.iter().map(|&c| c as i64).sum();
+                let total_current = if self.time_step > 0.0 {
+                    sum_current as f64 / self.time_step
+                } else {
+                    0.0
+                };
+                ui.label(format!("Total Current: {:.4}", total_current));
+            }
+
             match &self.dynamics {
                 Dynamics::CreutzKawasaki(creutz) => {
                     let sum_h: i32 = creutz.demons_h.iter().sum();
@@ -498,7 +472,7 @@ impl eframe::App for IsingApp {
             }
 
             ui.separator();
-            ui.heading("Профилирование");
+            ui.heading("Profiling");
             ui.label(format!(
                 "Simulation logic: {:.2} ms",
                 self.last_sweep_time_ms
