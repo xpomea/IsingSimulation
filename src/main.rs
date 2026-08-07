@@ -405,6 +405,7 @@ impl eframe::App for IsingApp {
             }
 
             ui.separator();
+            ui.label(format!("Time step: {:.0}", self.time_step));
             ui.label(format!("Magnetization: {:.3}", self.model.magnetization()));
             ui.label(format!(
                 "Energy: {:.3}",
