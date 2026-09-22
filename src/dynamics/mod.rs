@@ -17,6 +17,7 @@ pub use creutz::CreutzDynamics;
 pub enum BondSelection {
     Checkerboard,
     Random,
+    Quenched,
 }
 
 #[derive(Clone, Copy, PartialEq)]

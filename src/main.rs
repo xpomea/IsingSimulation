@@ -267,6 +267,7 @@ impl eframe::App for IsingApp {
                     .selected_text(match self.ui_bond_selection {
                         BondSelection::Random => "Random",
                         BondSelection::Checkerboard => "Checkerboard",
+                        BondSelection::Quenched => "Quenched",
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
@@ -278,6 +279,11 @@ impl eframe::App for IsingApp {
                             &mut self.ui_bond_selection,
                             BondSelection::Checkerboard,
                             "Checkerboard",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_bond_selection,
+                            BondSelection::Quenched,
+                            "Quenched",
                         );
                     });
 

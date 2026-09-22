@@ -21,6 +21,9 @@ pub struct KawasakiDynamics {
     n_internal: usize,
     n_total: usize,
 
+    bond_order: Vec<usize>,
+    bond_order_cursor: usize,
+
     reservoir_left: Vec<i32>,
     reservoir_right: Vec<i32>,
     cursor_left: usize,
@@ -41,10 +44,26 @@ impl KawasakiDynamics {
         let current_h = vec![0; l.saturating_sub(1)];
 
         let (edges, n_horizontal, n_internal, n_total) = if bond_selection == BondSelection::Random
+            || bond_selection == BondSelection::Quenched
         {
             build_edges(l)
         } else {
             (Vec::new(), l * (l - 1), l * (l - 1) + l * l, 2 * l * l + 2 * l)
+        };
+
+        const BATCH_SWEEPS: usize = 700;
+        let (bond_order, bond_order_cursor) = if bond_selection == BondSelection::Quenched {
+            let batch_sweeps = BATCH_SWEEPS.min((5_000_000 / n_total).max(1));
+            let mut order = Vec::with_capacity(n_total * batch_sweeps);
+            for _ in 0..batch_sweeps {
+                for r in 0..n_total {
+                    order.push(r);
+                }
+            }
+            order.shuffle(&mut rng);
+            (order, 0)
+        } else {
+            (Vec::new(), 0)
         };
 
         let (reservoir_left, reservoir_right) = if reservoir_type == ReservoirType::Quenched {
@@ -68,6 +87,8 @@ impl KawasakiDynamics {
             n_horizontal,
             n_internal,
             n_total,
+            bond_order,
+            bond_order_cursor,
             reservoir_left,
             reservoir_right,
             cursor_left: 0,
@@ -118,8 +139,7 @@ impl KawasakiDynamics {
         }
     }
 
-    fn step(&mut self, model: &mut IsingModel) {
-        let r = self.rng.random_range(0..self.n_total);
+    fn process_bond(&mut self, model: &mut IsingModel, r: usize) {
         let e = self.edges[r];
         let a = e[0] as usize;
 
@@ -154,6 +174,11 @@ impl KawasakiDynamics {
                 &mut self.rng,
             );
         }
+    }
+
+    fn step(&mut self, model: &mut IsingModel) {
+        let r = self.rng.random_range(0..self.n_total);
+        self.process_bond(model, r);
     }
 
     fn process_bonds_checkerboard(&mut self, model: &mut IsingModel) {
@@ -191,6 +216,16 @@ impl KawasakiDynamics {
             BondSelection::Random => {
                 for _ in 0..self.n_total {
                     self.step(model);
+                }
+            }
+            BondSelection::Quenched => {
+                for _ in 0..self.n_total {
+                    if self.bond_order_cursor >= self.bond_order.len() {
+                        self.bond_order_cursor = 0;
+                    }
+                    let r = self.bond_order[self.bond_order_cursor];
+                    self.process_bond(model, r);
+                    self.bond_order_cursor += 1;
                 }
             }
         }
