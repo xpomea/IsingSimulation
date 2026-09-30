@@ -13,20 +13,20 @@ pub use creutz_kawasaki::CreutzKawasakiDynamics;
 pub use creutz_thermal::CreutzThermalDynamics;
 pub use creutz::CreutzDynamics;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum BondSelection {
     Checkerboard,
     Random,
     Quenched,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ReservoirType {
     Annealed,
     Quenched,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum DemonReplacementMode {
     PerStep,
     PerSweep,

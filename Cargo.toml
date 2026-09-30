@@ -2,12 +2,14 @@
 name = "IsingSimulation"
 version = "0.1.0"
 edition = "2024"
+default-run = "IsingSimulation"
 
 [dependencies]
 eframe = "0.30"
 egui_plot = "0.30"
 image = "0.25.10"
 rand = "0.10.1"
+rayon = "1.10"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

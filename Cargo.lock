@@ -10,6 +10,7 @@ dependencies = [
  "egui_plot",
  "image",
  "rand 0.10.1",
+ "rayon",
 ]
 
 [[package]]
