@@ -40,8 +40,8 @@ impl Default for SimConfig {
             therm_sweeps: 1_000_000,
             meas_sweeps: 500_000,
             replacement_mode: DemonReplacementMode::PerStep,
-            bond_selection: BondSelection::Random,
-            reservoir_type: ReservoirType::Annealed,
+            bond_selection: BondSelection::Quenched,
+            reservoir_type: ReservoirType::Quenched,
         }
     }
 }

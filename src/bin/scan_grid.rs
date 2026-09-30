@@ -52,7 +52,7 @@ impl Default for CliArgs {
             m_max: 1.0,
             m_step: 0.05,
             band_depth: 0.03,
-            band_above: 0.02,
+            band_above: 1.0,
             band_m_step: 0.001,
         }
     }
