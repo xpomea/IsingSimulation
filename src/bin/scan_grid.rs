@@ -40,12 +40,12 @@ impl Default for CliArgs {
     fn default() -> Self {
         Self {
             mode: ScanMode::Band,
-            therm_sweeps: 2_000_000,
-            meas_sweeps: 500_000,
+            therm_sweeps: 3_000_000,
+            meas_sweeps: 1_000_000,
             threads: 6,
             l: 40,
             output_path: PathBuf::from("results/creutz_thermal_scan.csv"),
-            beta_min: 0.4,
+            beta_min: 0.45,
             beta_max: 1.20,
             beta_step: 0.02,
             m_min: 0.0,
@@ -53,7 +53,7 @@ impl Default for CliArgs {
             m_step: 0.05,
             band_depth: 0.03,
             band_above: 1.0,
-            band_m_step: 0.001,
+            band_m_step: 0.0005,
         }
     }
 }
