@@ -34,6 +34,7 @@ struct CliArgs {
     band_depth: f64,
     band_above: f64,
     band_m_step: f64,
+    center_zone_ratio: f64,
 }
 
 impl Default for CliArgs {
@@ -54,6 +55,7 @@ impl Default for CliArgs {
             band_depth: 0.03,
             band_above: 1.0,
             band_m_step: 0.0005,
+            center_zone_ratio: 0.65,
         }
     }
 }
@@ -87,6 +89,7 @@ GRID PARAMETERS:
     --band-depth <VAL>          Distance below m_beta to explore in band mode (default: 0.15)
     --band-above <VAL>          Distance above m_beta to explore in band mode (default: 0.01)
     --band-m-step <VAL>         Step size for m+ in band mode (default: 0.002)
+    --center-ratio <VAL>        Central zone width ratio for stable phase (default: 0.65, range: 0.1-0.95)
 
     -h, --help                  Print this help message
 "#
@@ -202,6 +205,12 @@ fn parse_cli_args() -> CliArgs {
                 i += 1;
                 if i < raw.len() {
                     args.band_m_step = raw[i].parse().unwrap_or(args.band_m_step);
+                }
+            }
+            "--center-ratio" => {
+                i += 1;
+                if i < raw.len() {
+                    args.center_zone_ratio = raw[i].parse().unwrap_or(args.center_zone_ratio);
                 }
             }
             other => {
@@ -359,7 +368,7 @@ fn main() {
         if is_new_file {
             writeln!(
                 writer,
-                "beta,m_plus,l,therm_sweeps,meas_sweeps,sum_current,j_flux,j_per_sweep,final_mag,mean_mag,final_energy,zero_crossings,phase,is_metastable,is_uphill,elapsed_sec"
+                "beta,m_plus,l,therm_sweeps,meas_sweeps,sum_current,j_flux,j_per_sweep,final_mag,mean_mag,final_energy,zero_crossings,zero_cross_pos,phase,is_metastable,is_uphill,elapsed_sec"
             ).expect("Failed to write CSV header");
             writer.flush().expect("Failed to flush CSV header");
         }
@@ -367,7 +376,7 @@ fn main() {
         while let Ok(res) = rx.recv() {
             writeln!(
                 writer,
-                "{:.6},{:.6},{},{},{},{},{:.8e},{:.8e},{:.6},{:.6},{:.6},{},{},{},{},{:.2}",
+                "{:.6},{:.6},{},{},{},{},{:.8e},{:.8e},{:.6},{:.6},{:.6},{},{:.4},{},{},{},{:.2}",
                 res.beta,
                 res.m_plus,
                 res.l,
@@ -380,6 +389,7 @@ fn main() {
                 res.mean_mag,
                 res.final_energy_per_spin,
                 res.zero_crossings,
+                res.zero_cross_pos,
                 res.phase,
                 if res.is_metastable { 1 } else { 0 },
                 if res.is_uphill { 1 } else { 0 },
@@ -406,6 +416,7 @@ fn main() {
             replacement_mode: DemonReplacementMode::PerStep,
             bond_selection: BondSelection::Quenched,
             reservoir_type: ReservoirType::Quenched,
+            center_zone_ratio: args.center_zone_ratio,
         };
 
         let result = run_simulation(&sim_config);
@@ -419,9 +430,9 @@ fn main() {
         }
 
         let status_tag = match result.phase.as_str() {
-            "metastable" => "[\x1b[32mMETASTABLE UPHILL\x1b[0m]",
+            "metastable" => "[\x1b[32mMETASTABLE\x1b[0m]",
             "weakly_unstable" => "[\x1b[33mWEAKLY-UNSTABLE\x1b[0m]",
-            "stable" => "[\x1b[34mSTABLE DOWNHILL\x1b[0m]",
+            "stable" => "[\x1b[34mSTABLE\x1b[0m]",
             _ => "[\x1b[35mCHAOTIC\x1b[0m]",
         };
 
@@ -433,7 +444,7 @@ fn main() {
         };
 
         println!(
-            "[{:>4}/{}] beta={:.4} m+={:.5} => J={:>+10.4e} <M>={:>+6.3} zc={} {} | took {:>5.2}s | ETA: {:>5.1}m",
+            "[{:>4}/{}] beta={:.4} m+={:.5} => J={:>+10.4e} <M>={:>+6.3} zc={} pos={:.3} {} | took {:>5.2}s | ETA: {:>5.1}m",
             done,
             total_pending,
             result.beta,
@@ -441,6 +452,7 @@ fn main() {
             result.j_flux,
             result.mean_mag,
             result.zero_crossings,
+            result.zero_cross_pos,
             status_tag,
             result.elapsed_sec,
             eta_sec / 60.0

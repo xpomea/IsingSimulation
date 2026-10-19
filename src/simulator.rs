@@ -29,6 +29,7 @@ pub struct SimConfig {
     pub replacement_mode: DemonReplacementMode,
     pub bond_selection: BondSelection,
     pub reservoir_type: ReservoirType,
+    pub center_zone_ratio: f64,
 }
 
 impl Default for SimConfig {
@@ -42,6 +43,7 @@ impl Default for SimConfig {
             replacement_mode: DemonReplacementMode::PerStep,
             bond_selection: BondSelection::Quenched,
             reservoir_type: ReservoirType::Quenched,
+            center_zone_ratio: 0.65,
         }
     }
 }
@@ -60,6 +62,7 @@ pub struct SimResult {
     pub mean_mag: f64,
     pub final_energy_per_spin: f64,
     pub zero_crossings: usize,
+    pub zero_cross_pos: f64,
     pub phase: String,
     pub is_metastable: bool,
     pub is_uphill: bool,
@@ -117,39 +120,8 @@ pub fn run_simulation(config: &SimConfig) -> SimResult {
     let col_mag: Vec<f64> = col_spin_sum.iter().map(|&s| s as f64 / col_denom).collect();
     let mean_mag: f64 = col_mag.iter().sum::<f64>() / config.l as f64;
 
-    // Count zero-crossings in time-averaged profile with hysteresis
-    let mut zero_crossings = 0;
-    let mut prev_sign = 0i32;
-    for &m_val in &col_mag {
-        let sign = if m_val > 0.05 {
-            1
-        } else if m_val < -0.05 {
-            -1
-        } else {
-            0
-        };
-        if sign != 0 {
-            if prev_sign != 0 && sign != prev_sign {
-                zero_crossings += 1;
-            }
-            prev_sign = sign;
-        }
-    }
-
-    // Phase identification:
-    // - Stable: instanton intact (single domain wall), downhill current (J <= 0)
-    // - Metastable: single bump, bulk uniformly ordered (|mean_mag| >= 0.4), uphill current (J > 0)
-    // - Weakly-unstable: double bump / multiple domain walls (zero_crossings >= 2 or broken bump)
-    // - Chaotic: disordered or high fluctuations
-    let (phase, is_metastable) = if j_flux <= 0.0 && zero_crossings <= 1 && mean_mag.abs() < 0.4 {
-        ("stable".to_string(), false)
-    } else if j_flux > 0.0 && zero_crossings <= 1 && mean_mag.abs() >= 0.4 {
-        ("metastable".to_string(), true)
-    } else if zero_crossings >= 2 || (j_flux > 0.0 && mean_mag.abs() < 0.4) {
-        ("weakly_unstable".to_string(), false)
-    } else {
-        ("chaotic".to_string(), false)
-    };
+    let (zero_crossings, zero_cross_pos, phase, is_metastable) =
+        analyze_profile_phase(&col_mag, config.center_zone_ratio);
 
     let elapsed_sec = start.elapsed().as_secs_f64();
     let final_mag = model.magnetization();
@@ -169,10 +141,97 @@ pub fn run_simulation(config: &SimConfig) -> SimResult {
         mean_mag,
         final_energy_per_spin,
         zero_crossings,
+        zero_cross_pos,
         phase,
         is_metastable,
         is_uphill,
         elapsed_sec,
         col_mag,
     }
+}
+
+/// Analyzes the column magnetization profile m(x) to classify the stationary phase.
+///
+/// Phase identification rules:
+/// - Stable: exactly 1 zero-crossing located in the central zone (e.g. 60-70% width)
+/// - Metastable: 1 zero-crossing near the boundary edges, or 0 crossings with ordered bulk
+/// - Weakly-unstable: >= 2 zero-crossings (double-bump profile)
+/// - Chaotic: disordered profile without coherent instanton or bump structure
+pub fn analyze_profile_phase(
+    col_mag: &[f64],
+    center_ratio: f64,
+) -> (usize, f64, String, bool) {
+    let l = col_mag.len();
+    let mean_mag = if l > 0 {
+        col_mag.iter().sum::<f64>() / l as f64
+    } else {
+        0.0
+    };
+
+    let mut zero_crossings = 0;
+    let mut crossing_positions = Vec::new();
+    let mut prev_sign = 0i32;
+    let mut prev_idx = 0usize;
+
+    for (x, &m_val) in col_mag.iter().enumerate() {
+        let sign = if m_val > 0.03 {
+            1
+        } else if m_val < -0.03 {
+            -1
+        } else {
+            0
+        };
+
+        if sign != 0 {
+            if prev_sign != 0 && sign != prev_sign {
+                zero_crossings += 1;
+                let m1 = col_mag[prev_idx];
+                let m2 = col_mag[x];
+                let denom = m2 - m1;
+                let frac = if denom.abs() > 1e-12 {
+                    (0.0 - m1) / denom
+                } else {
+                    0.5
+                };
+                let x_cross = prev_idx as f64 + frac * (x - prev_idx) as f64;
+                let norm_pos = x_cross / (l.saturating_sub(1).max(1) as f64);
+                crossing_positions.push(norm_pos.clamp(0.0, 1.0));
+            }
+            prev_sign = sign;
+            prev_idx = x;
+        }
+    }
+
+    let zero_cross_pos = if !crossing_positions.is_empty() {
+        crossing_positions[0]
+    } else {
+        -1.0
+    };
+
+    let center_ratio = center_ratio.clamp(0.1, 0.95);
+    let edge_margin = (1.0 - center_ratio) / 2.0;
+    let center_low = edge_margin;
+    let center_high = 1.0 - edge_margin;
+
+    let (phase, is_metastable) = if zero_crossings == 1 {
+        let pos = crossing_positions[0];
+        if pos >= center_low && pos <= center_high {
+            ("stable".to_string(), false)
+        } else {
+            ("metastable".to_string(), true)
+        }
+    } else if zero_crossings == 0 {
+        if mean_mag.abs() >= 0.4 {
+            // Bulk uniformly ordered, instanton completely pushed to boundary
+            ("metastable".to_string(), true)
+        } else {
+            ("chaotic".to_string(), false)
+        }
+    } else if zero_crossings >= 2 {
+        ("weakly_unstable".to_string(), false)
+    } else {
+        ("chaotic".to_string(), false)
+    };
+
+    (zero_crossings, zero_cross_pos, phase, is_metastable)
 }
