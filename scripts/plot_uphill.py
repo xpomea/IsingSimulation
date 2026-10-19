@@ -302,33 +302,34 @@ def plot_points(df, output_path):
             beta_vals,
             m_vals,
             color='black',
-            linewidth=2.4,
+            linewidth=2,
             label=r'$m_\beta = [1 - \sinh^{-4}(2\beta)]^{1/8}$',
-            zorder=5
+            zorder=0
         )
 
         if not zoomed:
             beta_sub = np.linspace(0.2, BETA_C, 200)
             ax.plot(beta_sub, np.zeros_like(beta_sub), color='black', linewidth=2.4, zorder=5)
 
+        # Uniform horizontally-elongated rectangular marker
+        # Avoids vertical merging when m_plus is sampled densely
+        rw = 4.0
+        rh = 0.191
+        rect_marker = [(-rw, -rh), (rw, -rh), (rw, rh), (-rw, rh)]
+        marker_size = 30 if not zoomed else 50
+
         # Categorize points by phase and current
         has_phase = 'phase' in df.columns or 'is_metastable' in df.columns
 
         if has_phase:
-            if 'is_metastable' in df.columns:
-                mask_meta = (df['is_metastable'] == 1) & (df['j_flux'] > 0.0)
-            else:
-                mask_meta = (df['phase'] == 'metastable') & (df['j_flux'] > 0.0)
-
             if 'phase' in df.columns:
-                mask_weak = (df['phase'] == 'weakly_unstable') & (df['j_flux'] > 0.0)
+                mask_meta = df['phase'] == 'metastable'
+                mask_weak = df['phase'] == 'weakly_unstable'
+                mask_stable = df['phase'] == 'stable'
             else:
+                mask_meta = df['is_metastable'] == 1
                 mask_weak = (~mask_meta) & (df['j_flux'] > 0.0)
-
-            if 'phase' in df.columns:
-                mask_stable = (df['phase'] == 'stable') | (df['j_flux'] <= 0.0)
-            else:
-                mask_stable = df['j_flux'] <= 0.0
+                mask_stable = (~mask_meta) & (df['j_flux'] <= 0.0)
 
             mask_other = ~(mask_meta | mask_weak | mask_stable)
 
@@ -337,11 +338,11 @@ def plot_points(df, output_path):
                     df.loc[mask_stable, 'beta'],
                     df.loc[mask_stable, 'm_plus'],
                     c='#1f77b4',
-                    marker='o',
-                    s=28,
-                    alpha=0.75,
+                    marker=rect_marker,
+                    s=marker_size,
+                    alpha=0.85,
                     edgecolors='none',
-                    label=f'Stable Downhill ($J \\leq 0$, n={mask_stable.sum()})',
+                    label=f'Stable (n={mask_stable.sum()})',
                     zorder=3
                 )
 
@@ -350,11 +351,11 @@ def plot_points(df, output_path):
                     df.loc[mask_weak, 'beta'],
                     df.loc[mask_weak, 'm_plus'],
                     c='#ff7f0e',
-                    marker='^',
-                    s=32,
-                    alpha=0.75,
+                    marker=rect_marker,
+                    s=marker_size,
+                    alpha=0.85,
                     edgecolors='none',
-                    label=f'Weakly-unstable ($J > 0$, n={mask_weak.sum()})',
+                    label=f'Weakly-unstable (n={mask_weak.sum()})',
                     zorder=3
                 )
 
@@ -363,12 +364,11 @@ def plot_points(df, output_path):
                     df.loc[mask_meta, 'beta'],
                     df.loc[mask_meta, 'm_plus'],
                     c='#d62728',
-                    marker='s',
-                    s=36,
-                    alpha=0.85,
-                    edgecolors='black',
-                    linewidths=0.5,
-                    label=f'Metastable Uphill ($J > 0$, n={mask_meta.sum()})',
+                    marker=rect_marker,
+                    s=marker_size,
+                    alpha=0.9,
+                    edgecolors='none',
+                    label=f'Metastable (n={mask_meta.sum()})',
                     zorder=4
                 )
 
@@ -377,9 +377,10 @@ def plot_points(df, output_path):
                     df.loc[mask_other, 'beta'],
                     df.loc[mask_other, 'm_plus'],
                     c='#9467bd',
-                    marker='x',
-                    s=26,
-                    alpha=0.7,
+                    marker=rect_marker,
+                    s=marker_size,
+                    alpha=0.85,
+                    edgecolors='none',
                     label=f'Chaotic / Other (n={mask_other.sum()})',
                     zorder=2
                 )
@@ -392,9 +393,9 @@ def plot_points(df, output_path):
                     df.loc[mask_down, 'beta'],
                     df.loc[mask_down, 'm_plus'],
                     c='#1f77b4',
-                    marker='o',
-                    s=28,
-                    alpha=0.75,
+                    marker=rect_marker,
+                    s=marker_size,
+                    alpha=0.85,
                     edgecolors='none',
                     label=f'Downhill ($J \\leq 0$, n={mask_down.sum()})',
                     zorder=3
@@ -405,9 +406,9 @@ def plot_points(df, output_path):
                     df.loc[mask_up, 'beta'],
                     df.loc[mask_up, 'm_plus'],
                     c='#d62728',
-                    marker='o',
-                    s=30,
-                    alpha=0.8,
+                    marker=rect_marker,
+                    s=marker_size,
+                    alpha=0.9,
                     edgecolors='none',
                     label=f'Uphill current ($J > 0$, n={mask_up.sum()})',
                     zorder=4
